@@ -101,6 +101,18 @@ li.done { opacity: 0.55; }
 .leg { font: 500 0.85rem/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .note { color: var(--muted); font-size: 0.85rem; margin: 0; }
 .note.warn { color: var(--warn); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.addrow { display: flex; gap: 10px; }
+.addrow input { flex: 1; min-width: 0; }
+.addrow button { width: auto; padding: 0 20px; }
+.pace { margin: 0; padding: 10px 14px; border-radius: 10px; font-weight: 500; background: var(--surface); border: 1px solid var(--line); }
+.pace.behind { border-color: var(--warn); color: var(--warn); }
+.acts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: none; border: 0; box-shadow: none;
+  color: var(--accent); font: 600 0.85rem/1.2 var(--body); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.addr small.stopnote { color: var(--fg); background: var(--bg); border-left: 3px solid var(--accent); padding: 4px 8px; margin-top: 6px; border-radius: 0 6px 6px 0; white-space: pre-wrap; }
+.noteedit { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.noteedit textarea { min-height: 70px; font-size: 0.95rem; padding: 8px 10px; line-height: 1.4; }
 @media (max-width: 420px) { .opts { grid-template-columns: 1fr; } .row { flex-direction: column; } }
 @media (prefers-reduced-motion: no-preference) { #result:not([hidden]) { animation: in .25s ease-out; } }
 @keyframes in { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -146,10 +158,16 @@ li.done { opacity: 0.55; }
     </div>
     <div id="map" role="img" aria-label="Map of the route"></div>
     <p id="doneNote" class="note" hidden></p>
+    <p id="paceNote" class="pace" hidden></p>
     <ol id="list"></ol>
     <p class="note">Check off stops as you go. If you skip one or fall behind, tap Re-plan to reorder what's left from where you are.</p>
     <div class="links" id="links"></div>
     <p id="linkNote" class="note" hidden></p>
+    <div class="addrow">
+      <label for="addStop" class="sr">Add a stop</label>
+      <input id="addStop" type="text" placeholder="Add a stop: address or store name" autocomplete="off">
+      <button id="addBtn" type="button" class="secondary">Add</button>
+    </div>
     <div class="row">
       <button id="replan" type="button" class="secondary">Re-plan from here</button>
       <button id="share" type="button" class="secondary">Share route</button>
@@ -157,7 +175,7 @@ li.done { opacity: 0.55; }
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 7 · Nov 7, 2026</p>
+  <p class="note">Version 8 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -542,11 +560,23 @@ function buildRoute(start, nodes, order, M, isRoad, dep, stay) {
   const stops = [], legs = [];
   for (const i of order) {
     const nd = nodes[i];
-    stops.push({ input: nd.input, label: nd.label, lat: nd.lat, lon: nd.lon, win: nd.win || null, chain: nd.chain || null, pin: nd.lead != null && nd.lead !== -2, done: false });
+    stops.push({ input: nd.input, label: nd.label, lat: nd.lat, lon: nd.lon, win: nd.win || null, chain: nd.chain || null, pin: nd.lead != null && nd.lead !== -2, note: nd.note || savedNote(nd.input), done: false });
     legs.push({ d: M.dist[from][i], t: M.dur ? M.dur[from][i] : null });
     from = i;
   }
-  return { v: 1, start: { lat: start.lat, lon: start.lon, label: start.label || "" }, stops, legs, dep, stay, isRoad, doneBefore: 0 };
+  const r = { v: 1, start: { lat: start.lat, lon: start.lon, label: start.label || "" }, stops, legs, dep, stay, isRoad, doneBefore: 0 };
+  r.plan = schedule(r).map(x => x.arrive);
+  return r;
+}
+
+// Notes are remembered by address, so a regular customer's gate code shows up next time too.
+function noteBook() { try { return JSON.parse(store.get("notes") || "{}"); } catch (e) { return {}; } }
+const noteKey = t => (t || "").toLowerCase().replace(/@.*$/, "").replace(/\s+/g, " ").trim();
+function savedNote(input) { return noteBook()[noteKey(input)] || ""; }
+function rememberNote(input, note) {
+  const b = noteBook(), k = noteKey(input);
+  if (note) b[k] = note; else delete b[k];
+  store.set("notes", JSON.stringify(b));
 }
 
 async function optimize(start, items, dep, stay) {
@@ -575,40 +605,56 @@ function hm(s) {
   const m = Math.round(s / 60);
   return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + (m % 60) + " min";
 }
-function schedule(r) {
-  const stay = (r.stay || 0) * 60;
-  let t = 0;
+// Arrival times (as clock times). Once you're under way they're live: check-offs set the clock,
+// and the next stop can't be reached before now plus the drive, so times slide if you fall behind.
+function schedule(r, live) {
+  const stay = (r.stay || 0) * 1000 * 60, now = Date.now();
+  const lastDone = r.stops.reduce((k, s, i) => s.done ? i : k, -1);
+  let clock = r.dep, first = true;
   return r.stops.map((s, i) => {
-    t += r.legs[i].t || 0;
-    let wait = 0;
+    const leg = (r.legs[i].t || 0) * 1000;
+    const skipped = !s.done && i < lastDone;
+    let arrive = clock + leg, wait = 0;
+    if (live && !s.done && !skipped && first) {
+      first = false;
+      if (now > r.dep) arrive = Math.max(arrive, now + Math.min(leg, 120000));
+    }
     const w = winSecs(s.win, r.dep);
-    if (w && w.open != null && t < w.open) { wait = w.open - t; t = w.open; }
-    const arrive = t, late = !!(w && w.close != null && arrive > w.close + 30);
-    t += stay;
-    return { arrive, wait, late };
+    const open = w && w.open != null ? r.dep + w.open * 1000 : null, close = w && w.close != null ? r.dep + w.close * 1000 : null;
+    if (open != null && arrive < open) { wait = (open - arrive) / 1000; arrive = open; }
+    const late = !s.done && !skipped && close != null && arrive > close + 30000;
+    if (s.done && live && s.doneAt) clock = s.doneAt;
+    else if (!skipped) clock = arrive + stay;
+    const planned = r.plan && r.plan[i] != null ? r.plan[i] : arrive;
+    return { arrive, wait, late, skipped, behind: (arrive - planned) / 60000 };
   });
 }
 
 // ---------- Rendering ----------
 let route = null;
 function saveRoute() { store.set("route", JSON.stringify(route)); }
-function setRoute(r, save) { route = r; if (save !== false) saveRoute(); render(); }
+function setRoute(r, save) {
+  if (!r.plan || r.plan.length !== r.stops.length) r.plan = schedule({ ...r, plan: null }).map(x => x.arrive);
+  route = r; if (save !== false) saveRoute(); render();
+}
 
 function renderTotals() {
   const dist = route.legs.reduce((a, l) => a + (l.d || 0), 0);
   const time = route.legs.reduce((a, l) => a + (l.t || 0), 0);
   $("tDist").textContent = miles(dist);
   $("tTime").textContent = hm(time);
-  const sch = schedule(route);
-  $("tEnd").textContent = sch.length ? fmtClock(new Date(route.dep + sch[sch.length - 1].arrive * 1000)) : "–";
+  const sch = schedule(route, true);
+  $("tEnd").textContent = sch.length ? fmtClock(new Date(sch[sch.length - 1].arrive)) : "–";
   const mpg = parseFloat($("mpg").value), price = parseFloat($("price").value);
   const show = mpg > 0 && price >= 0 && $("price").value !== "";
   $("costBox").hidden = !show;
   if (show) $("tCost").textContent = "$" + (dist / 1609.344 / mpg * price).toFixed(2);
 }
 
-function render() {
-  const r = route, list = $("list"), sch = schedule(r);
+let editingNote = -1;
+function render() { renderList(); renderRest(); }
+function renderList() {
+  const r = route, list = $("list"), sch = schedule(r, true);
   list.replaceChildren();
   const addRow = (cells, cls) => {
     const li = document.createElement("li");
@@ -632,18 +678,74 @@ function render() {
     addr.append(el("span", null, s.input));
     if (s.label && s.label !== s.input) addr.append(el("small", null, (s.chain ? "Picked: " : "") + s.label));
     const x = sch[i];
-    let eta = "Arrive " + fmtClock(new Date(r.dep + x.arrive * 1000));
-    if (x.wait >= 60) eta += " · wait " + hm(x.wait);
-    if (s.win) eta += " · " + winText(s.win);
-    if (x.late) eta += " · late";
+    let eta;
+    if (s.done) eta = s.doneAt ? "Done " + fmtClock(new Date(s.doneAt)) : "Done";
+    else if (x.skipped) eta = "Skipped";
+    else {
+      eta = "Arrive " + fmtClock(new Date(x.arrive));
+      if (x.wait >= 60) eta += " · wait " + hm(x.wait);
+      if (s.win) eta += " · " + winText(s.win);
+      if (x.late) eta += " · late";
+    }
     addr.append(el("small", "eta" + (x.late ? " late" : ""), eta));
+
+    if (editingNote === i) {
+      const box = el("div", "noteedit");
+      const ta = el("textarea");
+      ta.value = s.note || ""; ta.placeholder = "Gate code, contact, phone number, which door…";
+      ta.setAttribute("aria-label", "Note for stop " + (i + 1));
+      const row = el("div", "acts");
+      const save = el("button", "mini", "Save note"); save.type = "button"; save.dataset.act = "savenote"; save.dataset.i = i;
+      const cancel = el("button", "mini", "Cancel"); cancel.type = "button"; cancel.dataset.act = "cancelnote";
+      row.append(save, cancel);
+      box.append(ta, row);
+      addr.append(box);
+      setTimeout(() => ta.focus(), 0);
+    } else {
+      if (s.note) addr.append(el("small", "stopnote", s.note));
+      if (!s.done) {
+        const acts = el("div", "acts");
+        const nb = el("button", "mini", s.note ? "Edit note" : "Add note"); nb.type = "button"; nb.dataset.act = "note"; nb.dataset.i = i;
+        acts.append(nb);
+        if (!x.skipped) {
+          const a = el("a", "mini", "Text ETA");
+          a.href = etaText(s, x);
+          acts.append(a);
+        }
+        addr.append(acts);
+      }
+    }
     addRow([cb, el("span", "n", String(i + 1)), addr, el("span", "leg", "+" + miles(r.legs[i].d))], s.done ? "done" : "");
   });
 
+  // How you're doing against the plan, judged at the next stop.
+  const next = sch.find((x, i) => !r.stops[i].done && !x.skipped);
+  const pace = $("paceNote");
+  const started = Date.now() > r.dep && r.stops.some(s => s.done);
+  if (next && started && Math.abs(next.behind) >= 5) {
+    const m = Math.round(Math.abs(next.behind));
+    pace.textContent = next.behind > 0 ? "Running about " + hm(m * 60) + " behind plan. Arrival times below are updated." : "About " + hm(m * 60) + " ahead of plan.";
+    pace.className = "pace" + (next.behind > 0 ? " behind" : "");
+    pace.hidden = false;
+  } else pace.hidden = true;
+  renderTotals();
+}
+
+// A text message with the updated arrival time, ready to send. Uses a phone number from the stop's note if there is one.
+function etaText(s, x) {
+  const when = fmtClock(new Date(x.arrive));
+  const body = x.behind >= 5
+    ? "Hi, I'm running about " + hm(Math.round(x.behind) * 60) + " behind. I should arrive around " + when + "."
+    : "Hi, I'm on my way and should arrive around " + when + ".";
+  const ph = /(\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/.exec(s.note || "");
+  return "sms:" + (ph ? ph[2] + ph[3] + ph[4] : "") + "?&body=" + encodeURIComponent(body);
+}
+
+function renderRest() {
+  const r = route, sch = schedule(r);
   $("doneNote").hidden = !r.doneBefore;
   $("doneNote").textContent = r.doneBefore ? r.doneBefore + (r.doneBefore === 1 ? " stop" : " stops") + " already done before this re-plan." : "";
 
-  renderTotals();
   renderLinks();
   const notes = [];
   notes.push(r.isRoad ? "Order is based on real road driving." : "The road routing service didn't respond, so this order uses straight-line distance. It may not be the shortest drive.");
@@ -702,7 +804,7 @@ async function drawMap() {
   }
   map.invalidateSize();
   layer.clearLayers();
-  const r = route, sch = schedule(r);
+  const r = route, sch = schedule(r, true);
   const all = [r.start, ...r.stops];
   const ll = all.map(p => [p.lat, p.lon]);
   all.forEach((p, i) => {
@@ -738,20 +840,55 @@ $("list").addEventListener("change", e => {
   if (!cb.matches("input[type=checkbox]")) return;
   const i = +cb.dataset.i;
   route.stops[i].done = cb.checked;
+  if (cb.checked) route.stops[i].doneAt = Date.now(); else delete route.stops[i].doneAt;
+  editingNote = -1;
   saveRoute();
   render();
   const again = $("list").querySelector('input[data-i="' + i + '"]');
   if (again) again.focus();
 });
 
+// ---------- Stop notes ----------
+$("list").addEventListener("click", e => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const act = b.dataset.act, i = +b.dataset.i;
+  if (act === "note") { editingNote = i; renderList(); }
+  else if (act === "cancelnote") { editingNote = -1; renderList(); }
+  else if (act === "savenote") {
+    const ta = b.closest(".noteedit").querySelector("textarea");
+    const note = ta.value.trim().slice(0, 300);
+    route.stops[i].note = note;
+    rememberNote(route.stops[i].input, note);
+    editingNote = -1;
+    saveRoute();
+    renderList();
+    prepareShare();
+  }
+});
+// Arrival times keep up with the clock (skipped while a note is being typed).
+setInterval(() => { if (route && editingNote < 0 && !$("result").hidden) renderList(); }, 60000);
+
+// Picked stores show their street address, so you can see exactly where you're going.
+async function fillStoreAddresses(r) {
+  for (const s of r.stops) {
+    if (!s.chain || s.done || /\d/.test(s.label)) continue;
+    setStatus("Getting the address of " + s.label + "…");
+    const addr = await streetAddress(s).catch(() => null);
+    if (addr) s.label = s.label.split(",")[0] + " — " + addr;
+  }
+}
+
 // ---------- Re-plan what's left from where you are now ----------
-$("replan").addEventListener("click", async () => {
+$("replan").addEventListener("click", () => replanRoute(null));
+async function replanRoute(extra) {
   if (!route) return;
   const rem = route.stops.filter(s => !s.done);
-  if (!rem.length) return setStatus("Every stop is checked off. Nice work.");
-  const buttons = [btn, $("replan"), $("share")];
+  if (!rem.length && !extra) return setStatus("Every stop is checked off. Nice work.");
+  const buttons = [btn, $("replan"), $("share"), $("addBtn")];
   buttons.forEach(b => b.disabled = true);
   try {
+    if (extra) await resolveExtra(extra, rem);
     setStatus("Getting your location…");
     let start;
     try {
@@ -777,16 +914,51 @@ $("replan").addEventListener("click", async () => {
       }
       return { ...s, candidates: null, lead };
     });
+    if (extra) items.push({ ...extra, lead: -2 });
     const next = await optimize(start, items, Date.now(), route.stay || 0);
     next.doneBefore = (route.doneBefore || 0) + doneNow;
+    await fillStoreAddresses(next);
+    editingNote = -1;
     setRoute(next);
-    setStatus("Re-planned " + rem.length + (rem.length === 1 ? " stop" : " stops") + " from " + (start.label === "Your location" ? "where you are." : "your last stop."));
+    const where = start.label === "Your location" ? "where you are." : "your last stop.";
+    if (extra) {
+      const n = next.stops.findIndex(s => s.input === extra.input) + 1;
+      setStatus("Added “" + extra.input + "” as stop " + n + " and re-planned from " + where);
+      $("addStop").value = "";
+    } else {
+      setStatus("Re-planned " + rem.length + (rem.length === 1 ? " stop" : " stops") + " from " + where);
+    }
   } catch (err) {
     setStatus(err.message || "Something went wrong. Try again.", true);
   } finally {
     buttons.forEach(b => b.disabled = false);
   }
-});
+}
+
+// ---------- Add a stop to a route you're already driving ----------
+async function resolveExtra(it, rem) {
+  const anchors = [...rem, route.start];
+  setStatus("Looking up “" + (it.chain || it.text) + "”…");
+  if (it.chain) {
+    it.candidates = await findBranches(it.chain, anchors, 16000, PER_CHAIN);
+    if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near your route. Try a different name, or type a specific address.");
+  } else {
+    const g = await geocode(it.text, anchors[0]);
+    if (!g) throw new Error("Couldn't find “" + it.text + "”. Check the spelling and add a city and state, then try again.");
+    Object.assign(it, g);
+  }
+}
+function addStop() {
+  const raw = $("addStop").value.trim();
+  if (!raw || !route) return;
+  if (route.stops.filter(s => !s.done).length >= MAX) return setStatus("A route can hold " + MAX + " stops at a time. Check off or finish one first.", true);
+  let it;
+  try { it = parseLine(raw, route.stops.length); } catch (e) { return setStatus(e.message, true); }
+  it.note = savedNote(raw);
+  replanRoute(it);
+}
+$("addBtn").addEventListener("click", addStop);
+$("addStop").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addStop(); } });
 
 // ---------- Share as a link (the whole route is in the link; nothing is uploaded) ----------
 // The route is packed into short arrays and compressed, so the link stays short enough for Messages.
@@ -802,7 +974,7 @@ function packRoute(r) {
   return [2, r.dep, r.stay || 0, r.isRoad ? 1 : 0, [r5(r.start.lat), r5(r.start.lon), short(r.start.label)],
     r.stops.map((s, i) => [s.input, s.label && s.label !== s.input ? short(s.label) : "", r5(s.lat), r5(s.lon),
       s.win ? s.win.open : null, s.win ? s.win.close : null, s.chain ? 1 : 0, s.pin ? 1 : 0,
-      Math.round(r.legs[i].d || 0), Math.round(r.legs[i].t || 0)])];
+      Math.round(r.legs[i].d || 0), Math.round(r.legs[i].t || 0), s.note || ""])];
 }
 function unpackRoute(a) {
   if (!Array.isArray(a) || a[0] !== 2) return a; // older links were plain objects
@@ -811,7 +983,7 @@ function unpackRoute(a) {
     v: 1, dep, stay, isRoad: !!isRoad, doneBefore: 0,
     start: { lat: st[0], lon: st[1], label: st[2] },
     stops: ps.map(x => ({ input: x[0], label: x[1] || x[0], lat: x[2], lon: x[3],
-      win: x[4] != null || x[5] != null ? { open: x[4], close: x[5] } : null, chain: x[6] ? 1 : null, pin: !!x[7], done: false })),
+      win: x[4] != null || x[5] != null ? { open: x[4], close: x[5] } : null, chain: x[6] ? 1 : null, pin: !!x[7], note: x[10] || "", done: false })),
     legs: ps.map(x => ({ d: x[8], t: x[9] }))
   };
 }
@@ -915,12 +1087,8 @@ $("form").addEventListener("submit", async e => {
     }
 
     const r = await optimize(start, items, dep, stay);
-    for (const s of r.stops) {
-      if (!s.chain || /\d/.test(s.label)) continue;
-      setStatus("Getting the address of " + s.label + "…");
-      const addr = await streetAddress(s).catch(() => null);
-      if (addr) s.label = s.label.split(",")[0] + " — " + addr;
-    }
+    await fillStoreAddresses(r);
+    editingNote = -1;
     setRoute(r);
     setStatus("");
     if (location.hash) history.replaceState(null, "", location.pathname);
