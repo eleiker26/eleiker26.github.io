@@ -103,6 +103,32 @@ li.done { opacity: 0.55; }
 .note.warn { color: var(--warn); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .addbox { margin-top: -8px; }
+.tablehead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.tablehead .top { font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.tablemeta { display: flex; gap: 14px; align-items: baseline; font: 500 0.78rem/1 var(--mono); color: var(--muted); }
+.tablemeta .over { color: var(--warn); }
+.stoptable { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.srow { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) 7.5rem; align-items: center; border-top: 1px solid var(--line); position: relative; }
+.srow:first-child { border-top: 0; }
+#stopRows .srow:first-child { border-top: 1px solid var(--line); }
+#stopRows .srow:last-child { border-radius: 0 0 10px 10px; }
+.shead { font: 700 0.7rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.shead span { padding: 11px 12px; }
+.shead span:first-child { text-align: center; padding-inline: 0; }
+.shead i { font-style: normal; font-weight: 500; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+.srow .num { text-align: center; font: 700 0.85rem/1 var(--mono); color: var(--muted); }
+.srow.filled .num { color: var(--accent); }
+.srow .sugwrap { min-width: 0; }
+.stoptable input[type=text] { border: 0; border-radius: 0; background: transparent; padding: 12px; width: 100%; font-size: 0.98rem; }
+.stoptable input.timeIn { border-left: 1px solid var(--line); font-size: 0.9rem; }
+.stoptable input:focus-visible { outline: none; }
+.srow:not(.shead):focus-within { background: var(--bg); box-shadow: inset 3px 0 0 var(--accent); }
+.stoptable .suggest { left: -2.4rem; right: -7.5rem; }
+@media (max-width: 420px) {
+  .srow { grid-template-columns: 2rem minmax(0, 1fr) 5.6rem; }
+  .stoptable .suggest { left: -2rem; right: -5.6rem; }
+  .stoptable input.timeIn { padding-inline: 8px; }
+}
 .sugwrap { position: relative; }
 .suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px;
   background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); max-height: 340px; overflow: auto; }
@@ -145,9 +171,20 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
       <input id="start" type="text" autocomplete="street-address" placeholder="Leave blank to use your location">
     </div>
     <div class="field">
-      <label class="top" for="addresses">Stops, one per line <span id="count">0 / 12</span></label>
-      <textarea id="addresses" spellcheck="false" placeholder="123 Main St, Springfield, IL&#10;Shell gas station&#10;45 Oak Ave, Springfield, IL @ by 5pm&#10;any Kroger"></textarea>
-      <p class="hint">Need gas or lunch? Type a name like <code>Shell gas station</code>, <code>Wendy's</code> or <code>lunch</code> on the line after a stop. It stays right after that stop and uses the location with the least detour toward the next one. Start with <code>any</code>, like <code>any Kroger</code>, to let it go wherever fits best. Add a time after <code>@</code>, like <code>@ by 5pm</code> or <code>@ 2-4pm</code>.</p>
+      <div class="tablehead">
+        <span class="top" id="stopsLabel">Stops</span>
+        <span class="tablemeta"><span id="count">0 / 12</span><button id="clearStops" type="button" class="mini">Clear all</button></span>
+      </div>
+      <div class="stoptable" role="table" aria-labelledby="stopsLabel">
+        <div class="srow shead" role="row">
+          <span role="columnheader">#</span>
+          <span role="columnheader">Address or place</span>
+          <span role="columnheader">Arrive <i>optional</i></span>
+        </div>
+        <div id="stopRows" role="rowgroup"></div>
+      </div>
+      <textarea id="addresses" hidden aria-hidden="true" tabindex="-1"></textarea>
+      <p class="hint">Start typing and pick from the suggestions to lock in the exact spot. Put gas or food, like <code>Shell</code> or <code>Wendy's</code>, on the row right after a stop and it stays there. Start with <code>any</code>, like <code>any Kroger</code>, to let it go wherever fits best. Times can be <code>by 5pm</code>, <code>after 1pm</code> or <code>2-4pm</code>.</p>
     </div>
     <details id="optsBox">
       <summary>Options: leave time, stop time, gas cost</summary>
@@ -203,7 +240,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 12 · Nov 7, 2026</p>
+  <p class="note">Version 13 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -218,6 +255,63 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------- Saved inputs ----------
 box.value = store.get("stops") || "";
+// Build the 12 rows from the saved list.
+const rowsEl = $("stopRows"), rows = [];
+for (let i = 0; i < MAX; i++) {
+  const row = document.createElement("div");
+  row.className = "srow"; row.setAttribute("role", "row");
+  const num = document.createElement("span");
+  num.className = "num"; num.textContent = i + 1; num.setAttribute("role", "cell");
+  const stop = document.createElement("input");
+  stop.type = "text"; stop.className = "stopIn"; stop.id = "stop" + i; stop.autocomplete = "off"; stop.spellcheck = false;
+  stop.setAttribute("aria-label", "Stop " + (i + 1) + ", address or place");
+  stop.placeholder = i === 0 ? "123 Main St, Columbus, OH" : i === 1 ? "Shell" : "";
+  const time = document.createElement("input");
+  time.type = "text"; time.className = "timeIn"; time.autocomplete = "off";
+  time.setAttribute("aria-label", "Arrival time for stop " + (i + 1) + ", optional");
+  time.placeholder = i === 0 ? "by 5pm" : "";
+  const cell = document.createElement("div");
+  cell.setAttribute("role", "cell"); cell.style.minWidth = "0"; cell.append(stop);
+  row.append(num, cell, time);
+  rowsEl.append(row);
+  rows.push({ row, stop, time });
+}
+function rowsFromText(text) {
+  const ls = (text || "").split("\n").map(x => x.trim()).filter(Boolean);
+  rows.forEach((r, i) => {
+    const l = ls[i] || "", at = l.lastIndexOf("@");
+    r.stop.value = at >= 0 ? l.slice(0, at).trim() : l;
+    r.time.value = at >= 0 ? l.slice(at + 1).trim() : "";
+  });
+  markRows();
+}
+function markRows() { rows.forEach(r => r.row.classList.toggle("filled", !!r.stop.value.trim())); }
+function syncFromRows() {
+  box.value = rows.map(r => {
+    const st = r.stop.value.trim(), tm = r.time.value.trim().replace(/^@\s*/, "");
+    return st ? st + (tm ? " @ " + tm : "") : "";
+  }).filter(Boolean).join("\n");
+  markRows();
+  updateCount();
+}
+rowsFromText(box.value);
+rows.forEach((r, i) => {
+  r.stop.addEventListener("input", syncFromRows);
+  r.time.addEventListener("input", syncFromRows);
+  // Enter moves down to the next row instead of submitting.
+  for (const f of [r.stop, r.time]) f.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || e.defaultPrevented) return;
+    e.preventDefault();
+    const next = rows[i + 1];
+    if (next) next.stop.focus(); else btn.focus();
+  });
+});
+$("clearStops").addEventListener("click", () => {
+  if (!rows.some(r => r.stop.value || r.time.value)) return;
+  rows.forEach(r => { r.stop.value = ""; r.time.value = ""; });
+  syncFromRows();
+  rows[0].stop.focus();
+});
 for (const id of ["start", "stay", "mpg", "price"]) {
   $(id).value = store.get(id) || "";
   $(id).addEventListener("input", () => {
@@ -240,17 +334,10 @@ attachSuggest($("start"), {
   query: () => $("start").value,
   onPick: it => { $("start").value = it.text; store.set("start", it.text); }
 });
-attachSuggest(box, {
-  query: () => currentLine(box).text.replace(/@.*$/, ""),
-  onPick: it => {
-    const ln = currentLine(box), keep = (ln.text.match(/\s*@.*$/) || [""])[0];
-    const line = it.text + keep;
-    box.value = box.value.slice(0, ln.a) + line + box.value.slice(ln.z);
-    const caret = ln.a + line.length;
-    box.setSelectionRange(caret, caret);
-    updateCount();
-  }
-});
+rows.forEach(r => attachSuggest(r.stop, {
+  query: () => r.stop.value,
+  onPick: it => { r.stop.value = it.text; syncFromRows(); r.time.focus(); }
+}));
 
 function setStatus(msg, isError) {
   statusEl.textContent = msg;
@@ -409,7 +496,7 @@ function parseLine(raw, i) {
   const at = raw.lastIndexOf("@");
   if (at >= 0) {
     win = parseWindow(raw.slice(at + 1));
-    if (!win) throw new Error("Couldn't read the time on stop " + (i + 1) + ", “" + raw + "”. Try “@ by 5pm”, “@ after 1pm” or “@ 2-4pm”.");
+    if (!win) throw new Error("Couldn't read the arrival time on stop " + (i + 1) + ", “" + raw + "”. Try “by 5pm”, “after 1pm” or “2-4pm”.");
     text = raw.slice(0, at).trim();
   }
   // No house number means a place name ("Shell gas station", "Wendy's", "a pharmacy").
@@ -1235,8 +1322,11 @@ function addStop() {
   // No route yet: it simply joins the list above.
   if (!route) {
     if (lines().length >= MAX) return setStatus("You already have " + MAX + " stops, the most one route can hold.", true);
-    box.value = box.value.replace(/\s*$/, "") + (box.value.trim() ? "\n" : "") + raw;
-    updateCount();
+    const empty = rows.find(r => !r.stop.value.trim());
+    const at = raw.lastIndexOf("@");
+    empty.stop.value = at >= 0 ? raw.slice(0, at).trim() : raw;
+    empty.time.value = at >= 0 ? raw.slice(at + 1).trim() : "";
+    syncFromRows();
     closeAdd();
     return setStatus("Added “" + raw + "” to your stops. Tap Find my route when you're ready.");
   }
