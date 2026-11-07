@@ -1421,7 +1421,9 @@ function focusPin(i) {
   const mk = markers[i];
   if (!mk || !map) return;
   $("map").scrollIntoView({ behavior: "smooth", block: "center" });
-  map.setView(mk.getLatLng(), Math.max(map.getZoom(), 14));
+  // Put the pin low in the map so its card has room above it.
+  map.setView(mk.getLatLng(), Math.max(map.getZoom(), 14), { animate: false });
+  map.panBy([0, -Math.round($("map").clientHeight * 0.3)], { animate: false });
   mk.openPopup();
 }
 async function drawMap() {
@@ -1446,7 +1448,7 @@ async function drawMap() {
     const icon = L.divIcon({ className: "", html: '<div class="pin ' + cls + '">' + (i || "●") + "</div>",
       iconSize: [26, 26], iconAnchor: quick ? [2, 30] : [13, 13] });
     const mk = L.marker([p.lat, p.lon], { icon, zIndexOffset: (quick ? 1000 : 0) + i, title: i ? (i + ". " + (s.label || s.input)) : "Start" }).addTo(layer);
-    mk.bindPopup(() => pinCard(i), { maxWidth: 280, minWidth: 220, autoPanPadding: [20, 20] });
+    mk.bindPopup(() => pinCard(i), { maxWidth: 280, minWidth: 220, autoPan: true, autoPanPaddingTopLeft: [20, 40], autoPanPaddingBottomRight: [20, 20] });
     markers[i] = mk;
     if (quick) L.circleMarker([p.lat, p.lon], { radius: 4, color: "#fff", weight: 2, fillColor: "#d97706", fillOpacity: 1 }).addTo(layer);
   });
