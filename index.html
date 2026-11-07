@@ -119,8 +119,8 @@ li.done { opacity: 0.55; }
     </div>
     <div class="field">
       <label class="top" for="addresses">Stops, one per line <span id="count">0 / 12</span></label>
-      <textarea id="addresses" spellcheck="false" placeholder="123 Main St, Springfield, IL&#10;any Kroger&#10;a gas station&#10;45 Oak Ave, Springfield, IL @ by 5pm"></textarea>
-      <p class="hint">Type <code>any Kroger</code> or <code>a gas station</code> and the route picks the location that fits best. Add a time after <code>@</code>, like <code>@ by 5pm</code>, <code>@ after 1pm</code> or <code>@ 2-4pm</code>.</p>
+      <textarea id="addresses" spellcheck="false" placeholder="123 Main St, Springfield, IL&#10;Shell gas station&#10;45 Oak Ave, Springfield, IL @ by 5pm&#10;any Kroger"></textarea>
+      <p class="hint">Need gas or lunch? Type a name like <code>Shell gas station</code>, <code>Wendy's</code> or <code>lunch</code> on the line after a stop. It stays right after that stop and uses the location with the least detour toward the next one. Start with <code>any</code>, like <code>any Kroger</code>, to let it go wherever fits best. Add a time after <code>@</code>, like <code>@ by 5pm</code> or <code>@ 2-4pm</code>.</p>
     </div>
     <details id="optsBox">
       <summary>Options: leave time, stop time, gas cost</summary>
@@ -156,7 +156,7 @@ li.done { opacity: 0.55; }
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 5 · Nov 7, 2026</p>
+  <p class="note">Version 6 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -236,9 +236,15 @@ function parseLine(raw, i) {
     if (!win) throw new Error("Couldn't read the time on stop " + (i + 1) + ", “" + raw + "”. Try “@ by 5pm”, “@ after 1pm” or “@ 2-4pm”.");
     text = raw.slice(0, at).trim();
   }
-  const m = /^(?:any|an|a)\s+(.+)$/i.exec(text);
-  const chain = m && !/\d/.test(text) ? m[1].trim() : null;
-  return { input: raw, text, chain, win };
+  // No house number means a place name ("Shell gas station", "Wendy's", "a pharmacy").
+  // Plain names stay right after the line above; "any …" can go wherever fits best.
+  let chain = null, float = false;
+  if (!/\d/.test(text)) {
+    const m = /^any\s+(.+)$/i.exec(text);
+    if (m) { chain = m[1].trim(); float = true; }
+    else chain = text.replace(/^(?:an|a)\s+/i, "").trim();
+  }
+  return { input: raw, text, chain, float, win };
 }
 const fmtClock = d => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 function fmtMin(min) { const d = new Date(); d.setHours(0, min, 0, 0); return fmtClock(d); }
@@ -342,11 +348,24 @@ const CATS = {
   "restaurant": '["amenity"="restaurant"]', "fast food": '["amenity"="fast_food"]', "convenience store": '["shop"="convenience"]',
   "ev charger": '["amenity"="charging_station"]', "charging station": '["amenity"="charging_station"]',
   "hospital": '["amenity"="hospital"]', "urgent care": '["amenity"="clinic"]', "park": '["leisure"="park"]',
-  "mailbox": '["amenity"="post_box"]', "drop box": '["amenity"="post_box"]', "car repair": '["shop"="car_repair"]'
+  "mailbox": '["amenity"="post_box"]', "drop box": '["amenity"="post_box"]', "car repair": '["shop"="car_repair"]',
+  "lunch": '["amenity"~"^(fast_food|restaurant)$"]', "dinner": '["amenity"~"^(fast_food|restaurant)$"]',
+  "breakfast": '["amenity"~"^(fast_food|restaurant|cafe)$"]', "food": '["amenity"~"^(fast_food|restaurant)$"]',
+  "coffee": '["amenity"="cafe"]', "store": "", "station": ""
 };
-function catFilter(term) {
-  const t = term.toLowerCase().replace(/\s+/g, " ").trim();
-  return CATS[t] || CATS[t.replace(/e?s$/, "")] || null;
+// "Shell gas station" → kind of place (fuel) + name (Shell). Either part may be missing.
+function storeQuery(term) {
+  let t = term.toLowerCase().replace(/[’']/g, "").replace(/\s+/g, " ").trim();
+  let cat = null, key = "";
+  for (const k of Object.keys(CATS)) {
+    if (k.length > key.length && new RegExp("(^| )" + k + "(e?s)?( |$)").test(t)) { key = k; cat = CATS[k] || null; }
+  }
+  if (key) t = t.replace(new RegExp("(^| )" + key + "(e?s)?( |$)"), " ");
+  let name = t.replace(/[^\p{L}\p{N}\s&-]/gu, "").trim();
+  if (!name) return { cat, name: null };
+  // Match "wendys" to "Wendy's" and "chick fil a" to "Chick-fil-A".
+  name = name.replace(/s\b/g, "['’]?s").replace(/[\s-]+/g, "[ -]?");
+  return { cat, name };
 }
 function hav(a, b) {
   const R = 6371000, rad = x => x * Math.PI / 180;
@@ -354,13 +373,14 @@ function hav(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
-async function overpassFind(term, anchors) {
-  const f = catFilter(term);
-  const t = term.replace(/[^\p{L}\p{N}\s'&-]/gu, "").trim();
-  if (!f && !t) return [];
+async function overpassFind(term, anchors, radius) {
+  const { cat, name } = storeQuery(term);
+  if (!cat && !name) return [];
+  const f = cat || "";
   const parts = anchors.map(a => {
-    const ar = "(around:16000," + a.lat.toFixed(5) + "," + a.lon.toFixed(5) + ")";
-    return f ? "nwr" + f + ar + ";" : 'nwr["brand"~"^' + t + '",i]' + ar + ';nwr["name"~"^' + t + '",i]' + ar + ";";
+    const ar = "(around:" + radius + "," + a.lat.toFixed(5) + "," + a.lon.toFixed(5) + ")";
+    return name ? "nwr" + f + '["brand"~"^' + name + '",i]' + ar + ";nwr" + f + '["name"~"^' + name + '",i]' + ar + ";"
+                : "nwr" + f + ar + ";";
   }).join("");
   const q = "[out:json][timeout:25];(" + parts + ");out center 300;";
   const res = await fetch("https://overpass-api.de/api/interpreter", {
@@ -386,16 +406,21 @@ async function nominatimFind(term, anchors) {
   if (!res.ok) throw new Error("http");
   return (await res.json()).map(d => ({ lat: +d.lat, lon: +d.lon, label: d.display_name }));
 }
-async function findBranches(term, anchors) {
+async function findBranches(term, anchors, radius, limit) {
   let found = [];
-  try { found = await overpassFind(term, anchors); } catch (e) {}
+  try { found = await overpassFind(term, anchors, radius); } catch (e) {}
   if (!found.length) { try { found = await nominatimFind(term, anchors); } catch (e) {} }
   const near = p => Math.min(...anchors.map(a => hav(a, p)));
-  found.sort((a, b) => near(a) - near(b));
+  found = found.filter(p => near(p) <= radius * 1.5).sort((a, b) => near(a) - near(b));
   const out = [];
   for (const p of found) {
     if (out.every(q => hav(p, q) > 150)) out.push(p);
-    if (out.length === PER_CHAIN) break;
+    if (out.length === limit) break;
+  }
+  if (!out.length) {
+    // Last try: treat it as a named place ("Columbus Zoo", "Cleveland, OH").
+    const g = await geocode(term, anchors[0]).catch(() => null);
+    if (g && (term.includes(",") || near(g) <= 150000)) out.push(g);
   }
   return out;
 }
@@ -419,8 +444,15 @@ function straightMatrix(pts) {
 // Exact search over every order (Held–Karp). Each "group" is one stop; an "any X" stop is a
 // group with several possible locations, and the route visits exactly one per group.
 // With time windows: fewest minutes late first, then earliest finish. Without: least distance.
-function solve(D, T, group, G, win, stay, useTime) {
+// lead[g]: -2 = can go anywhere, -1 = must come first, k = must come right after group k.
+function solve(D, T, group, G, win, stay, useTime, lead) {
   const N = D.length, FULL = 1 << G, S = FULL * N;
+  lead = lead || new Array(G).fill(-2);
+  const follow = new Array(G).fill(-1);
+  let first = -1;
+  lead.forEach((a, g) => { if (a === -1) first = g; else if (a >= 0) follow[a] = g; });
+  const canStart = g => first >= 0 ? g === first : lead[g] === -2;
+  const canGo = (a, g) => follow[a] >= 0 ? g === follow[a] : lead[g] === -2;
   const late = new Float64Array(S).fill(Infinity), tim = new Float64Array(S), dst = new Float64Array(S);
   const prv = new Int16Array(S).fill(-1);
   const better = (l, t, c, idx) => {
@@ -442,6 +474,7 @@ function solve(D, T, group, G, win, stay, useTime) {
     return [la, a + stay];
   };
   for (let n = 1; n < N; n++) {
+    if (!canStart(group[n])) continue;
     const s = step(0, n, 0);
     if (!s) continue;
     const idx = (1 << group[n]) * N + n;
@@ -454,7 +487,7 @@ function solve(D, T, group, G, win, stay, useTime) {
       if (late[idx] === Infinity) continue;
       for (let m = 1; m < N; m++) {
         const g = group[m];
-        if ((mask >> g) & 1) continue;
+        if (((mask >> g) & 1) || !canGo(group[n], g)) continue;
         const s = step(n, m, tim[idx]);
         if (!s) continue;
         const l = late[idx] + s[0], c = dst[idx] + D[n][m], j = (mask | (1 << g)) * N + m;
@@ -487,7 +520,7 @@ function buildRoute(start, nodes, order, M, isRoad, dep, stay) {
   const stops = [], legs = [];
   for (const i of order) {
     const nd = nodes[i];
-    stops.push({ input: nd.input, label: nd.label, lat: nd.lat, lon: nd.lon, win: nd.win || null, chain: nd.chain || null, done: false });
+    stops.push({ input: nd.input, label: nd.label, lat: nd.lat, lon: nd.lon, win: nd.win || null, chain: nd.chain || null, pin: nd.lead != null && nd.lead !== -2, done: false });
     legs.push({ d: M.dist[from][i], t: M.dur ? M.dur[from][i] : null });
     from = i;
   }
@@ -509,7 +542,8 @@ async function optimize(start, items, dep, stay) {
   if (!M.dur) M.dur = straightMatrix(nodes).dur;
   const win = nodes.map(nd => winSecs(nd.win, dep));
   const useTime = items.some(it => it.win);
-  const order = solve(M.dist, M.dur, group, items.length, win, stay * 60, useTime);
+  const lead = items.map(it => it.lead == null ? -2 : it.lead);
+  const order = solve(M.dist, M.dur, group, items.length, win, stay * 60, useTime, lead);
   return buildRoute(start, nodes, order, M, isRoad, dep, stay);
 }
 
@@ -592,7 +626,8 @@ function render() {
   const notes = [];
   notes.push(r.isRoad ? "Order is based on real road driving." : "The road routing service didn't respond, so this order uses straight-line distance. It may not be the shortest drive.");
   if (r.stops.some(s => s.win)) notes.push("With time windows, the order puts on-time arrival first, then the earliest finish.");
-  if (r.stops.some(s => s.chain)) notes.push("For “any” stops, the location that adds the least to the trip was picked.");
+  if (r.stops.some(s => s.pin)) notes.push("Quick stops like gas or food stay right after the stop above them, at the location with the least detour.");
+  if (r.stops.some(s => s.chain && !s.pin)) notes.push("For “any” stops, the location that adds the least to the whole trip was picked.");
   $("note").textContent = notes.join(" ");
   const lateN = sch.filter(x => x.late).length;
   $("warnNote").hidden = !lateN;
@@ -703,7 +738,19 @@ $("replan").addEventListener("click", async () => {
       await sleep(800);
     }
     const doneNow = route.stops.length - rem.length;
-    const next = await optimize(start, rem.map(s => ({ ...s, candidates: null })), Date.now(), route.stay || 0);
+    // Quick stops keep their place right after the stop above them; if that one is done, they come first.
+    let firstTaken = false;
+    const items = rem.map(s => {
+      const i = route.stops.indexOf(s);
+      let lead = -2;
+      if (s.pin) {
+        const prev = route.stops[i - 1];
+        if (prev && !prev.done) lead = rem.indexOf(prev);
+        else if (!firstTaken) { lead = -1; firstTaken = true; }
+      }
+      return { ...s, candidates: null, lead };
+    });
+    const next = await optimize(start, items, Date.now(), route.stay || 0);
     next.doneBefore = (route.doneBefore || 0) + doneNow;
     setRoute(next);
     setStatus("Re-planned " + rem.length + (rem.length === 1 ? " stop" : " stops") + " from " + (start.label === "Your location" ? "where you are." : "your last stop."));
@@ -722,7 +769,7 @@ function packRoute(r) {
   return {
     v: 1, dep: r.dep, stay: r.stay || 0, isRoad: r.isRoad,
     start: { lat: r5(r.start.lat), lon: r5(r.start.lon), label: r.start.label },
-    stops: r.stops.map(s => ({ input: s.input, label: s.label, lat: r5(s.lat), lon: r5(s.lon), win: s.win, chain: s.chain ? 1 : null })),
+    stops: r.stops.map(s => ({ input: s.input, label: s.label, lat: r5(s.lat), lon: r5(s.lon), win: s.win, chain: s.chain ? 1 : null, pin: s.pin ? 1 : 0 })),
     legs: r.legs.map(l => ({ d: Math.round(l.d || 0), t: Math.round(l.t || 0) }))
   };
 }
@@ -791,10 +838,22 @@ $("form").addEventListener("submit", async e => {
       Object.assign(it, g);
     }
     const anchors = [start, ...fixed];
-    for (const it of items.filter(it => it.chain)) {
-      setStatus("Finding nearby “" + it.chain + "” locations…");
-      it.candidates = await findBranches(it.chain, anchors);
-      if (!it.candidates.length) throw new Error("Couldn't find any “" + it.chain + "” near your route. Try a different name, or type a specific address.");
+    items.forEach((it, i) => { it.lead = it.chain && !it.float ? i - 1 : -2; });
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.chain) continue;
+      let near = anchors, radius = 16000, limit = PER_CHAIN;
+      if (!it.float) {
+        // Stays right after the line above: search around the closest address above it.
+        let prev = start;
+        for (let k = i - 1; k >= 0; k--) if (!items[k].chain) { prev = items[k]; break; }
+        near = [prev]; radius = 25000; limit = 8;
+        setStatus("Finding “" + it.chain + "” near " + (prev === start ? "your start" : "stop " + (items.indexOf(prev) + 1)) + "…");
+      } else {
+        setStatus("Finding nearby “" + it.chain + "” locations…");
+      }
+      it.candidates = await findBranches(it.chain, near, radius, limit);
+      if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near " + (it.float ? "your route" : "the stop above it") + ". Try a different name, or type a specific address.");
     }
 
     const r = await optimize(start, items, dep, stay);
