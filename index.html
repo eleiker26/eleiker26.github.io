@@ -6,6 +6,8 @@
 <title>Shortest Stop Route</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 /* Layout: one narrow column — address box, one button, then the ordered stop list. */
 :root {
@@ -78,6 +80,13 @@ li:first-child { border-top: 0; }
 .addr small { display: block; color: var(--muted); font-size: 0.8rem; }
 .leg { font: 500 0.85rem/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+#map { height: 340px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; z-index: 0; }
+.pin {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-fg); border: 2px solid #fff;
+  font: 700 12px/1 var(--mono); box-shadow: 0 1px 4px rgba(0,0,0,.35);
+}
+.pin.start { background: var(--fg); color: var(--bg); }
 @media (prefers-reduced-motion: no-preference) { #result:not([hidden]) { animation: in .25s ease-out; } }
 @keyframes in { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 </style>
@@ -106,11 +115,12 @@ li:first-child { border-top: 0; }
       <div><b id="tDist">–</b><small>total distance</small></div>
       <div><b id="tTime">–</b><small>drive time</small></div>
     </div>
+    <div id="map" role="img" aria-label="Map of the route"></div>
     <ol id="list"></ol>
     <a id="maps" class="btn" href="#" target="_blank" rel="noopener">Open in Google Maps</a>
     <p id="note" class="note"></p>
   </section>
-  <p class="note">Version 3 · Nov 7, 2026</p>
+  <p class="note">Version 4 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -303,6 +313,39 @@ function render(start, stops, order, M, isRoad) {
     ? "Order is based on road driving distance. The route ends at the last stop."
     : "The road routing service didn't respond, so this order uses straight-line distance. It may not be the shortest drive.";
   $("result").hidden = false;
+  drawMap(start, pts);
+}
+
+// Map: numbered pins plus the actual driving path (straight lines if the road service is down).
+let map, layer;
+async function drawMap(start, pts) {
+  if (!window.L) { $("map").hidden = true; return; }
+  if (!map) {
+    map = L.map("map", { scrollWheelZoom: false });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    layer = L.layerGroup().addTo(map);
+  }
+  map.invalidateSize();
+  layer.clearLayers();
+  const all = [start, ...pts];
+  const ll = all.map(p => [p.lat, p.lon]);
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#0b7a5a";
+  all.forEach((p, i) => {
+    const icon = L.divIcon({ className: "", html: '<div class="pin' + (i ? "" : " start") + '">' + (i || "●") + "</div>", iconSize: [26, 26], iconAnchor: [13, 13] });
+    L.marker([p.lat, p.lon], { icon, title: i ? "Stop " + i : "Start" }).addTo(layer);
+  });
+  map.fitBounds(ll, { padding: [30, 30], maxZoom: 15 });
+
+  let path = ll, dashed = true;
+  try {
+    const coords = all.map(p => p.lon.toFixed(6) + "," + p.lat.toFixed(6)).join(";");
+    const res = await fetch("https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson");
+    const j = await res.json();
+    if (j.code === "Ok" && j.routes[0]) { path = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); dashed = false; }
+  } catch (e) {}
+  L.polyline(path, { color, weight: 5, opacity: 0.85, dashArray: dashed ? "6 8" : null }).addTo(layer).bringToBack();
 }
 
 $("form").addEventListener("submit", async e => {
