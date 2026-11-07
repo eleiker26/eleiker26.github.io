@@ -128,6 +128,10 @@ button.calday.sel { background: var(--accent); color: var(--accent-fg); }
 .unsched li small { display: block; color: var(--muted); font-size: 0.82rem; }
 .unsched .acts input[type=date] { width: auto; padding: 4px 8px; font-size: 0.85rem; }
 .jobpanel { margin-bottom: 10px; }
+.backup { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 12px; margin-top: 10px; }
+.backup .hint { margin: 0; }
+.backup .hint.stale { color: var(--warn); }
+.backup .acts { margin-top: 0; }
 .jobtitle { font: 700 1rem/1.2 var(--display); }
 .jobgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .jobgrid .full { grid-column: 1 / -1; }
@@ -237,6 +241,14 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
         <div class="unhead"><b>Not scheduled yet</b><span id="unCount"></span></div>
         <ul id="unList"></ul>
       </div>
+      <div class="backup">
+        <span id="backupInfo" class="hint"></span>
+        <span class="acts">
+          <button id="backupBtn" type="button" class="mini">Back up schedule</button>
+          <button id="restoreBtn" type="button" class="mini">Restore</button>
+        </span>
+        <input id="restoreFile" type="file" accept=".json,application/json" hidden>
+      </div>
     </section>
     <div class="field">
       <div class="tablehead">
@@ -308,7 +320,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 14 · Nov 7, 2026</p>
+  <p class="note">Version 15 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -445,6 +457,7 @@ function renderCal() {
     grid.append(b);
   }
   renderUnsched();
+  renderBackupInfo();
 }
 $("calGrid").addEventListener("click", e => { const b = e.target.closest("button[data-day]"); if (b) selectDay(b.dataset.day); });
 $("calPrev").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() - 1); renderCal(); });
@@ -516,6 +529,78 @@ $("jobSave").addEventListener("click", () => {
     setStatus("Saved to “Not scheduled yet.” Pick a date for it whenever you're ready.");
   }
 });
+// ---------- Backup and restore ----------
+// Everything you'd hate to lose: every day's jobs, the unscheduled list, stop notes, picked places and settings.
+const BACKUP_KEYS = ["days", "unscheduled", "notes", "picks", "route", "start", "stay", "mpg", "price", "lastPos"];
+function renderBackupInfo() {
+  const last = +store.get("lastBackup") || 0, el = $("backupInfo");
+  const hasData = Object.keys(daysBook()).length || unBook().length;
+  if (!last) { el.textContent = hasData ? "Not backed up yet." : "Back up your schedule to keep it safe."; el.className = "hint" + (hasData ? " stale" : ""); return; }
+  const daysAgo = Math.floor((Date.now() - last) / 86400000);
+  el.textContent = "Last backup: " + new Date(last).toLocaleDateString([], { month: "short", day: "numeric" }) + (daysAgo >= 7 ? " (over a week ago)" : "");
+  el.className = "hint" + (daysAgo >= 7 && hasData ? " stale" : "");
+}
+$("backupBtn").addEventListener("click", async () => {
+  const data = { app: "shortest-stop-route", version: 1, saved: new Date().toISOString(), data: {} };
+  for (const k of BACKUP_KEYS) { const v = store.get(k); if (v != null) data.data[k] = v; }
+  const name = "route-schedule-backup-" + todayKey() + ".json";
+  const file = new File([JSON.stringify(data, null, 1)], name, { type: "application/json" });
+  // On a phone, the share menu lets you save it to Files, iCloud Drive or email it to yourself.
+  if (isPhone && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "Route schedule backup" });
+      store.set("lastBackup", String(Date.now())); renderBackupInfo();
+      return setStatus("Backup saved. Keep it somewhere safe, like Files, iCloud Drive or your email.");
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  store.set("lastBackup", String(Date.now())); renderBackupInfo();
+  setStatus("Backup downloaded as " + name + ". Keep it somewhere safe, like iCloud Drive, Google Drive or your email.");
+});
+$("restoreBtn").addEventListener("click", () => $("restoreFile").click());
+$("restoreFile").addEventListener("change", async () => {
+  const f = $("restoreFile").files[0];
+  $("restoreFile").value = "";
+  if (!f) return;
+  let b;
+  try { b = JSON.parse(await f.text()); } catch (e) { return setStatus("That file isn't a schedule backup.", true); }
+  if (!b || b.app !== "shortest-stop-route" || !b.data) return setStatus("That file isn't a schedule backup from this site.", true);
+  const d = b.data, parse = (v, dflt) => { try { return JSON.parse(v); } catch (e) { return dflt; } };
+  const theirDays = parse(d.days || "{}", {}), theirUn = parse(d.unscheduled || "[]", []);
+  const nDays = Object.keys(theirDays).length;
+  if (!window.confirm("Restore the backup from " + new Date(b.saved).toLocaleDateString() + "? Its jobs (" + nDays + (nDays === 1 ? " day" : " days") +
+    (theirUn.length ? ", " + theirUn.length + " unscheduled" : "") + ") will be added to what's already here. Nothing here gets deleted.")) return;
+  // Merge, never replace: jobs added since the backup stay put.
+  const days = daysBook(), un = unBook(), seen = new Set(un.map(j => pickKey(j.place)));
+  let added = 0;
+  for (const [k, text] of Object.entries(theirDays)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || typeof text !== "string") continue;
+    const mine = (days[k] || "").split("\n").filter(x => x.trim());
+    const have = new Set(mine.map(pickKey));
+    for (const l of text.split("\n").map(x => x.trim()).filter(Boolean)) {
+      if (have.has(pickKey(l))) continue;
+      if (mine.length < MAX) { mine.push(l); have.add(pickKey(l)); added++; }
+      else if (!seen.has(pickKey(l))) { const at = l.lastIndexOf("@"); un.push({ place: at >= 0 ? l.slice(0, at).trim() : l, time: at >= 0 ? l.slice(at + 1).trim() : "", note: "Was on " + dayName(k) + " (that day was full)", added: Date.now() }); seen.add(pickKey(l)); added++; }
+    }
+    if (mine.length) days[k] = mine.join("\n");
+  }
+  for (const j of Array.isArray(theirUn) ? theirUn : []) {
+    if (j && typeof j.place === "string" && !seen.has(pickKey(j.place))) { un.push(j); seen.add(pickKey(j.place)); added++; }
+  }
+  saveDays(days); saveUn(un);
+  for (const k of ["notes", "picks"]) {   // keep your newer notes when both have one
+    const merged = { ...parse(d[k] || "{}", {}), ...parse(store.get(k) || "{}", {}) };
+    store.set(k, JSON.stringify(merged));
+  }
+  for (const k of ["start", "stay", "mpg", "price", "lastPos"]) if (d[k] != null && !store.get(k)) store.set(k, d[k]);
+  if (!route && d.route) { const r = parse(d.route, null); if (validRoute(r)) setRoute(r); }
+  selectDay(selDay);
+  setStatus(added ? "Restored " + added + (added === 1 ? " job" : " jobs") + " from your backup." : "Everything in that backup was already here.");
+});
+
 function renderUnsched() {
   const list = unBook(), ul = $("unList");
   $("unsched").hidden = !list.length;
