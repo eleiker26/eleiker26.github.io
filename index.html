@@ -265,11 +265,11 @@ for (let i = 0; i < MAX; i++) {
   const stop = document.createElement("input");
   stop.type = "text"; stop.className = "stopIn"; stop.id = "stop" + i; stop.autocomplete = "off"; stop.spellcheck = false;
   stop.setAttribute("aria-label", "Stop " + (i + 1) + ", address or place");
-  stop.placeholder = i === 0 ? "123 Main St, Columbus, OH" : i === 1 ? "Shell" : "";
+  stop.placeholder = i === 0 ? "e.g. 123 Main St, Columbus, OH" : i === 1 ? "e.g. Shell" : "";
   const time = document.createElement("input");
   time.type = "text"; time.className = "timeIn"; time.autocomplete = "off";
   time.setAttribute("aria-label", "Arrival time for stop " + (i + 1) + ", optional");
-  time.placeholder = i === 0 ? "by 5pm" : "";
+  time.placeholder = i === 0 ? "e.g. by 5pm" : "";
   const cell = document.createElement("div");
   cell.setAttribute("role", "cell"); cell.style.minWidth = "0"; cell.append(stop);
   row.append(num, cell, time);
