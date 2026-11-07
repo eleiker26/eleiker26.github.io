@@ -110,6 +110,7 @@ li:first-child { border-top: 0; }
     <a id="maps" class="btn" href="#" target="_blank" rel="noopener">Open in Google Maps</a>
     <p id="note" class="note"></p>
   </section>
+  <p class="note">Version 3 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -153,16 +154,62 @@ async function getLocation() {
   }
 }
 
-// Free OpenStreetMap geocoder. Allows 1 request per second, so lookups run one at a time.
-async function geocode(q, near) {
-  const d = 1.5; // prefer results within ~100 miles of you
+// Address lookup tries three free services in turn, so one missing house number doesn't stop the route.
+
+// 1. U.S. Census Bureau: covers nearly every U.S. house number. Loaded as JSONP (it has no CORS support).
+let jsonpId = 0;
+function censusLookup(q) {
+  return new Promise((resolve, reject) => {
+    const cb = "censusCb" + (++jsonpId);
+    const s = document.createElement("script");
+    const done = () => { delete window[cb]; s.remove(); clearTimeout(timer); };
+    const timer = setTimeout(() => { done(); reject(new Error("timeout")); }, 9000);
+    window[cb] = data => {
+      done();
+      const m = data && data.result && data.result.addressMatches && data.result.addressMatches[0];
+      resolve(m ? { lat: +m.coordinates.y, lon: +m.coordinates.x, label: m.matchedAddress } : null);
+    };
+    s.onerror = () => { done(); reject(new Error("network")); };
+    s.src = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=jsonp&callback=" +
+      cb + "&address=" + encodeURIComponent(q);
+    document.head.append(s);
+  });
+}
+
+// 2. OpenStreetMap (Nominatim). Allows 1 request per second.
+async function osmLookup(q, near) {
+  const d = 1.5; // prefer results within ~100 miles
   let url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q);
   if (near) url += "&viewbox=" + [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(",");
   const res = await fetch(url, { headers: { "Accept": "application/json" } });
-  if (!res.ok) throw new Error("The address lookup service didn't respond. Try again in a minute.");
+  if (!res.ok) throw new Error("http " + res.status);
   const data = await res.json();
-  if (!data.length) return null;
-  return { lat: +data[0].lat, lon: +data[0].lon, label: data[0].display_name };
+  return data.length ? { lat: +data[0].lat, lon: +data[0].lon, label: data[0].display_name } : null;
+}
+
+// 3. Photon (also OpenStreetMap data, different search engine).
+async function photonLookup(q, near) {
+  let url = "https://photon.komoot.io/api/?limit=1&q=" + encodeURIComponent(q);
+  if (near) url += "&lat=" + near.lat + "&lon=" + near.lon;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("http " + res.status);
+  const f = (await res.json()).features?.[0];
+  if (!f) return null;
+  const p = f.properties || {};
+  const label = [[p.housenumber, p.street || p.name].filter(Boolean).join(" "), p.city, p.state, p.postcode].filter(Boolean).join(", ");
+  return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], label };
+}
+
+async function geocode(q, near) {
+  let failures = 0;
+  for (const lookup of [censusLookup, osmLookup, photonLookup]) {
+    try {
+      const r = await lookup(q, near);
+      if (r && isFinite(r.lat) && isFinite(r.lon)) return r;
+    } catch (e) { failures++; }
+  }
+  if (failures === 3) throw new Error("The address lookup services didn't respond. Check your internet connection, then try again.");
+  return null;
 }
 
 // Real road distances between every pair of points (OSRM public server).
@@ -292,7 +339,7 @@ $("form").addEventListener("submit", async e => {
       setStatus("Looking up address " + (i + 1) + " of " + list.length + "…");
       if (i > 0) await sleep(1100);
       const g = await geocode(list[i], start);
-      if (!g) throw new Error("Couldn't find “" + list[i] + "”. Add a city and state, then try again.");
+      if (!g) throw new Error("Couldn't find stop " + (i + 1) + ", “" + list[i] + "”. Check the spelling and add a city and state, then try again.");
       stops.push({ input: list[i], ...g });
     }
 
