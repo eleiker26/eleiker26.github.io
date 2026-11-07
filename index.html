@@ -86,6 +86,18 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .pin.start { background: var(--fg); color: var(--bg); }
 .pin.late { background: var(--warn); color: #fff; }
 .pin.done { background: #8a948f; color: #fff; }
+.leaflet-container .leaflet-popup-content-wrapper, .leaflet-container .leaflet-popup-tip { background: var(--surface); color: var(--fg); box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+.leaflet-container .leaflet-popup-content { margin: 12px 14px; font: 0.9rem/1.4 var(--body); }
+.leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+.pincard b { display: block; font: 700 0.98rem/1.3 var(--display); padding-right: 14px; }
+.pincard small { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+.pincard .eta { display: block; font: 500 0.82rem/1.3 var(--mono); margin-top: 6px; }
+.pincard .eta.late { color: var(--warn); }
+.pincard .pnote { margin: 8px 0 0; padding: 6px 8px; background: var(--bg); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; white-space: pre-wrap; }
+.pincard .pnote.empty { color: var(--muted); border-left-color: var(--line); font-size: 0.82rem; }
+.pincard .acts { margin-top: 8px; }
+.leaflet-container .pincard a.mini { color: var(--accent); }
+button.pinbtn { display: inline; width: auto; padding: 4px 2px; background: none; border: 0; border-radius: 4px; color: var(--accent); font: 700 0.95rem/1 var(--mono); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
 .pin.quick { background: #d97706; color: #fff; border-radius: 50% 50% 50% 0; }
 ol { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 li { display: grid; grid-template-columns: 1.4rem 1.6rem 1fr auto; gap: 8px; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); }
@@ -320,7 +332,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 15 · Nov 7, 2026</p>
+  <p class="note">Version 16 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -1289,7 +1301,9 @@ function renderList() {
         addr.append(acts);
       }
     }
-    addRow([cb, el("span", "n", String(i + 1)), addr, el("span", "leg", "+" + miles(r.legs[i].d))], s.done ? "done" : "");
+    const nb = el("button", "n pinbtn", String(i + 1));
+    nb.type = "button"; nb.dataset.pin = i + 1; nb.setAttribute("aria-label", "Show stop " + (i + 1) + " on the map");
+    addRow([cb, nb, addr, el("span", "leg", "+" + miles(r.legs[i].d))], s.done ? "done" : "");
   });
 
   // How you're doing against the plan, judged at the next stop.
@@ -1366,7 +1380,50 @@ function renderLinks() {
 }
 
 // Map: numbered pins plus the actual driving path (straight lines if the road service is down).
-let map, layer, pathCache = { key: "", path: null };
+let map, layer, pathCache = { key: "", path: null }, markers = [];
+
+// The card that opens when you tap a pin: what the stop is, when you'll get there, and the job notes.
+function pinCard(i) {
+  const r = route, el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const card = el("div", "pincard");
+  if (!i) {
+    card.append(el("b", null, "Start"), el("small", null, r.start.label || "Your location"), el("span", "eta", "Leave " + fmtClock(new Date(r.dep))));
+    return card;
+  }
+  const s = r.stops[i - 1], x = schedule(r, true)[i - 1];
+  card.append(el("b", null, i + " · " + s.input.replace(/\s*@.*$/, "")));
+  if (s.label && s.label !== s.input) card.append(el("small", null, s.label));
+  let eta = s.done ? (s.doneAt ? "Done " + fmtClock(new Date(s.doneAt)) : "Done") : x.skipped ? "Skipped" : "Arrive " + fmtClock(new Date(x.arrive));
+  if (!s.done && s.win) eta += " · " + winText(s.win);
+  if (!s.done && x.late) eta += " · late";
+  card.append(el("span", "eta" + (x.late && !s.done ? " late" : ""), eta));
+  if (s.note) card.append(el("p", "pnote", s.note));
+  else card.append(el("p", "pnote empty", "No job notes yet. Add them from the stop list."));
+  const acts = el("div", "acts");
+  const dir = el("a", "mini", "Directions");
+  dir.href = "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + s.lat.toFixed(6) + "," + s.lon.toFixed(6);
+  dir.target = "_blank"; dir.rel = "noopener";
+  acts.append(dir);
+  if (!s.done && !x.skipped) { const t = el("a", "mini", "Text ETA"); t.href = etaText(s, x); acts.append(t); }
+  const done = el("button", "mini", s.done ? "Undo done" : "Mark done");
+  done.type = "button";
+  done.addEventListener("click", () => {
+    s.done = !s.done;
+    if (s.done) s.doneAt = Date.now(); else delete s.doneAt;
+    editingNote = -1; saveRoute(); render();
+  });
+  acts.append(done);
+  card.append(acts);
+  return card;
+}
+// Tapping a number in the stop list shows that stop on the map.
+function focusPin(i) {
+  const mk = markers[i];
+  if (!mk || !map) return;
+  $("map").scrollIntoView({ behavior: "smooth", block: "center" });
+  map.setView(mk.getLatLng(), Math.max(map.getZoom(), 14));
+  mk.openPopup();
+}
 async function drawMap() {
   if (!window.L) { $("map").hidden = true; return; }
   if (!map) {
@@ -1378,6 +1435,7 @@ async function drawMap() {
   }
   map.invalidateSize();
   layer.clearLayers();
+  markers = [];
   const r = route, sch = schedule(r, true);
   const all = [r.start, ...r.stops];
   const ll = all.map(p => [p.lat, p.lon]);
@@ -1387,7 +1445,9 @@ async function drawMap() {
     const cls = (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (quick ? " quick" : "");
     const icon = L.divIcon({ className: "", html: '<div class="pin ' + cls + '">' + (i || "●") + "</div>",
       iconSize: [26, 26], iconAnchor: quick ? [2, 30] : [13, 13] });
-    L.marker([p.lat, p.lon], { icon, zIndexOffset: (quick ? 1000 : 0) + i, title: i ? (i + ". " + (s.label || s.input)) : "Start" }).addTo(layer);
+    const mk = L.marker([p.lat, p.lon], { icon, zIndexOffset: (quick ? 1000 : 0) + i, title: i ? (i + ". " + (s.label || s.input)) : "Start" }).addTo(layer);
+    mk.bindPopup(() => pinCard(i), { maxWidth: 280, minWidth: 220, autoPanPadding: [20, 20] });
+    markers[i] = mk;
     if (quick) L.circleMarker([p.lat, p.lon], { radius: 4, color: "#fff", weight: 2, fillColor: "#d97706", fillOpacity: 1 }).addTo(layer);
   });
   map.fitBounds(ll, { padding: [30, 30], maxZoom: 15 });
@@ -1424,6 +1484,8 @@ $("list").addEventListener("change", e => {
 
 // ---------- Stop notes ----------
 $("list").addEventListener("click", e => {
+  const pb = e.target.closest("button[data-pin]");
+  if (pb) return focusPin(+pb.dataset.pin);
   const b = e.target.closest("button[data-act]");
   if (!b) return;
   const act = b.dataset.act, i = +b.dataset.i;
