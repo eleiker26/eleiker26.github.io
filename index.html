@@ -102,6 +102,8 @@ li.done { opacity: 0.55; }
 .note { color: var(--muted); font-size: 0.85rem; margin: 0; }
 .note.warn { color: var(--warn); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.addbox { margin-top: -8px; }
+.sharebox input { font-family: var(--mono); font-size: 0.85rem; }
 .addrow { display: flex; gap: 10px; }
 .addrow input { flex: 1; min-width: 0; }
 .addrow button { width: auto; padding: 0 20px; }
@@ -149,6 +151,15 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
   <button id="go" type="submit" form="form">Find my route</button>
   <p id="status" class="status" role="status" aria-live="polite"></p>
 
+  <div class="addbox">
+    <label class="top" for="addStop">Add a stop <span>optional</span></label>
+    <div class="addrow">
+      <input id="addStop" type="text" placeholder="Address or store name, like Shell" autocomplete="off">
+      <button id="addBtn" type="button" class="secondary">Add</button>
+    </div>
+    <p id="addHint" class="hint">Adds it to your stops above.</p>
+  </div>
+
   <section id="result" hidden>
     <div class="totals">
       <div><b id="tDist">–</b><small>total distance</small></div>
@@ -163,19 +174,21 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p class="note">Check off stops as you go. If you skip one or fall behind, tap Re-plan to reorder what's left from where you are.</p>
     <div class="links" id="links"></div>
     <p id="linkNote" class="note" hidden></p>
-    <div class="addrow">
-      <label for="addStop" class="sr">Add a stop</label>
-      <input id="addStop" type="text" placeholder="Add a stop: address or store name" autocomplete="off">
-      <button id="addBtn" type="button" class="secondary">Add</button>
-    </div>
     <div class="row">
       <button id="replan" type="button" class="secondary">Re-plan from here</button>
       <button id="share" type="button" class="secondary">Share route</button>
     </div>
+    <div id="shareBox" class="sharebox" hidden>
+      <label for="shareLink" class="top">Route link</label>
+      <div class="addrow">
+        <input id="shareLink" type="text" readonly>
+        <button id="copyBtn" type="button" class="secondary">Copy</button>
+      </div>
+    </div>
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 8 · Nov 7, 2026</p>
+  <p class="note">Version 9 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -324,15 +337,33 @@ async function nomGate() {
   if (wait > 0) await sleep(wait);
   lastNom = Date.now();
 }
+// "2187 Neil Ave, Columbus, OH" instead of the full county-and-country version.
+const STATES = { alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",delaware:"DE",
+  "district of columbia":"DC",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",kansas:"KS",
+  kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",minnesota:"MN",mississippi:"MS",missouri:"MO",
+  montana:"MT",nebraska:"NE",nevada:"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC",
+  "north dakota":"ND",ohio:"OH",oklahoma:"OK",oregon:"OR",pennsylvania:"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD",
+  tennessee:"TN",texas:"TX",utah:"UT",vermont:"VT",virginia:"VA",washington:"WA","west virginia":"WV",wisconsin:"WI",wyoming:"WY" };
+function shortAddr(a) {
+  if (!a) return "";
+  const street = [a.house_number, a.road].filter(Boolean).join(" ");
+  const st = a.state ? (STATES[a.state.toLowerCase()] || a.state) : "";
+  return [street, a.city || a.town || a.village || a.hamlet || a.suburb, st].filter(Boolean).join(", ");
+}
+function placeLabel(name, a, fallback) {
+  const addr = shortAddr(a);
+  if (name && addr) return name + " — " + addr;
+  return addr || name || fallback;
+}
 async function osmLookup(q, near) {
   await nomGate();
   const d = 1.5;
-  let url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q);
+  let url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=" + encodeURIComponent(q);
   if (near) url += "&viewbox=" + [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(",");
   const res = await fetch(url, { headers: { "Accept": "application/json" } });
   if (!res.ok) throw new Error("http " + res.status);
   const data = await res.json();
-  return data.length ? { lat: +data[0].lat, lon: +data[0].lon, label: data[0].display_name } : null;
+  return data.length ? { lat: +data[0].lat, lon: +data[0].lon, label: placeLabel(data[0].name, data[0].address, data[0].display_name) } : null;
 }
 async function photonLookup(q, near) {
   let url = "https://photon.komoot.io/api/?limit=1&q=" + encodeURIComponent(q);
@@ -381,11 +412,13 @@ function storeQuery(term) {
   }
   if (key) t = t.replace(new RegExp("(^| )" + key + "(e?s)?( |$)"), " ");
   let name = t.replace(/[^\p{L}\p{N}\s&-]/gu, "").trim();
-  if (!name) return { cat, name: null };
+  if (!name) return { cat, name: null, plain: "" };
+  const plain = plainName(name);
   // Match "wendys" to "Wendy's" and "chick fil a" to "Chick-fil-A".
   name = name.replace(/s\b/g, "['’]?s").replace(/[\s-]+/g, "[ -]?");
-  return { cat, name };
+  return { cat, name, plain };
 }
+const plainName = t => (t || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 function hav(a, b) {
   const R = 6371000, rad = x => x * Math.PI / 180;
   const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
@@ -402,24 +435,25 @@ async function overpassFind(term, anchors, radius) {
                 : "nwr" + f + ar + ";";
   }).join("");
   const q = "[out:json][timeout:25];(" + parts + ");out center 300;";
-  let j = null;
-  for (const server of ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]) {
-    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
-    try {
-      const res = await fetch(server, {
-        method: "POST", body: "data=" + encodeURIComponent(q), signal: ctl.signal,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" }
-      });
-      if (res.ok) { j = await res.json(); break; }
-    } catch (e) {} finally { clearTimeout(timer); }
-  }
-  if (!j) throw new Error("overpass");
+  const ask = server => {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 7000);
+    return fetch(server, {
+      method: "POST", body: "data=" + encodeURIComponent(q), signal: ctl.signal,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" }
+    }).then(res => { if (!res.ok) throw new Error("http"); return res.json(); })
+      .finally(() => clearTimeout(timer));
+  };
+  // Ask both servers at once and use whichever answers first; give up after 7 seconds.
+  const j = await Promise.any(["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"].map(ask));
   return (j.elements || []).map(e => {
     const tg = e.tags || {};
-    const street = [tg["addr:housenumber"], tg["addr:street"]].filter(Boolean).join(" ");
+    const nm = tg.name || tg.brand || term;
+    const st = tg["addr:state"] ? (STATES[tg["addr:state"].toLowerCase()] || tg["addr:state"]) : "";
+    const addr = [[tg["addr:housenumber"], tg["addr:street"]].filter(Boolean).join(" "), tg["addr:city"], st].filter(Boolean).join(", ");
     return {
       lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon,
-      label: [tg.name || tg.brand || term, street, tg["addr:city"]].filter(Boolean).join(", ")
+      name: nm, brand: tg.brand || "",
+      label: addr && /\d/.test(addr) ? nm + " — " + addr : nm
     };
   }).filter(p => isFinite(p.lat) && isFinite(p.lon));
 }
@@ -427,7 +461,7 @@ async function nominatimFind(term, anchors) {
   await nomGate();
   const lats = anchors.map(p => p.lat), lons = anchors.map(p => p.lon), pad = 0.2;
   const vb = [Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad, Math.min(...lats) - pad];
-  const res = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&viewbox=" + vb.join(",") + "&q=" + encodeURIComponent(term));
+  const res = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=40&bounded=1&viewbox=" + vb.join(",") + "&q=" + encodeURIComponent(term));
   if (!res.ok) throw new Error("http");
   const { cat, name } = storeQuery(term);
   const nameRe = name ? new RegExp("^" + name, "i") : null;
@@ -435,14 +469,22 @@ async function nominatimFind(term, anchors) {
   return (await res.json()).filter(d =>
     (!nameRe || nameRe.test(d.name || "")) &&
     (!kind || (d.category === kind[1] && kind[2].split("|").includes(d.type)))
-  ).map(d => ({ lat: +d.lat, lon: +d.lon, label: d.display_name }));
+  ).map(d => ({ lat: +d.lat, lon: +d.lon, name: d.name || "", label: placeLabel(d.name, d.address, d.display_name) }));
 }
 async function findBranches(term, anchors, radius, limit) {
-  let found = [];
-  try { found = await overpassFind(term, anchors, radius); } catch (e) {}
-  if (!found.length) { try { found = await nominatimFind(term, anchors); } catch (e) {} }
+  // Both searches start together; the backup is only used if the main one comes back empty.
+  const main = overpassFind(term, anchors, radius).catch(() => []);
+  const backup = nominatimFind(term, anchors).catch(() => []);
+  let found = await main;
+  if (!found.length) found = await backup;
   const near = p => Math.min(...anchors.map(a => hav(a, p)));
   found = found.filter(p => near(p) <= radius * 1.5).sort((a, b) => near(a) - near(b));
+  // "Kroger" should be the Kroger store, not Kroger Pharmacy or Kroger Fuel Center, when the store itself is nearby.
+  const { plain } = storeQuery(term);
+  if (plain) {
+    const exact = found.filter(p => plainName(p.name) === plain);
+    if (exact.length) found = exact;
+  }
   const out = [];
   for (const p of found) {
     if (out.every(q => hav(p, q) > 150)) out.push(p);
@@ -460,9 +502,7 @@ async function streetAddress(p) {
   await nomGate();
   const res = await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=" + p.lat + "&lon=" + p.lon);
   if (!res.ok) return null;
-  const a = (await res.json()).address || {};
-  const street = [a.house_number, a.road].filter(Boolean).join(" ");
-  return [street, a.city || a.town || a.village || a.hamlet, a.state].filter(Boolean).join(", ") || null;
+  return shortAddr((await res.json()).address) || null;
 }
 
 // ---------- Distances ----------
@@ -652,7 +692,10 @@ function renderTotals() {
 }
 
 let editingNote = -1;
-function render() { renderList(); renderRest(); }
+function render() {
+  renderList(); renderRest();
+  $("addHint").textContent = "Fits it into the route you're driving, starting from where you are now.";
+}
 function renderList() {
   const r = route, list = $("list"), sch = schedule(r, true);
   list.replaceChildren();
@@ -758,6 +801,7 @@ function renderRest() {
   $("warnNote").textContent = lateN ? "No order gets to every stop on time. " + lateN + (lateN === 1 ? " stop is" : " stops are") + " marked late; this order keeps the lateness as small as possible." : "";
   $("result").hidden = false;
   shareUrl = "";
+  $("shareBox").hidden = true;
   prepareShare();
   drawMap();
 }
@@ -890,7 +934,7 @@ async function replanRoute(extra) {
   try {
     if (extra) await resolveExtra(extra, rem);
     setStatus("Getting your location…");
-    let start;
+    let start, from = "where you are.";
     try {
       start = { ...(await getLocation()), label: "Your location" };
     } catch (err) {
@@ -898,7 +942,8 @@ async function replanRoute(extra) {
       route.stops.forEach(s => { if (s.done) last = s; });
       const p = last || route.start;
       start = { lat: p.lat, lon: p.lon, label: last ? (last.label || last.input) : route.start.label };
-      setStatus("Couldn't get your location, so re-planning from your last finished stop…");
+      from = last ? "your last finished stop." : "your starting point.";
+      setStatus("Couldn't get your location, so re-planning from " + from.replace(".", "…"));
       await sleep(800);
     }
     const doneNow = route.stops.length - rem.length;
@@ -920,7 +965,7 @@ async function replanRoute(extra) {
     await fillStoreAddresses(next);
     editingNote = -1;
     setRoute(next);
-    const where = start.label === "Your location" ? "where you are." : "your last stop.";
+    const where = from;
     if (extra) {
       const n = next.stops.findIndex(s => s.input === extra.input) + 1;
       setStatus("Added “" + extra.input + "” as stop " + n + " and re-planned from " + where);
@@ -950,7 +995,15 @@ async function resolveExtra(it, rem) {
 }
 function addStop() {
   const raw = $("addStop").value.trim();
-  if (!raw || !route) return;
+  if (!raw) return setStatus("Type an address or a store name to add.", true);
+  // No route yet: it simply joins the list above.
+  if (!route) {
+    if (lines().length >= MAX) return setStatus("You already have " + MAX + " stops, the most one route can hold.", true);
+    box.value = box.value.replace(/\s*$/, "") + (box.value.trim() ? "\n" : "") + raw;
+    updateCount();
+    $("addStop").value = "";
+    return setStatus("Added “" + raw + "” to your stops. Tap Find my route when you're ready.");
+  }
   if (route.stops.filter(s => !s.done).length >= MAX) return setStatus("A route can hold " + MAX + " stops at a time. Check off or finish one first.", true);
   let it;
   try { it = parseLine(raw, route.stops.length); } catch (e) { return setStatus(e.message, true); }
@@ -1008,19 +1061,37 @@ function copyText(text) {
   const ok = document.execCommand("copy"); ta.remove();
   return ok ? Promise.resolve() : Promise.reject(new Error("copy"));
 }
+function showShareBox(url) {
+  $("shareLink").value = url;
+  $("shareBox").hidden = false;
+}
+// Copying can hang in some browsers, so give it two seconds and then point to the box.
+function tryCopy(url) {
+  showShareBox(url);
+  const timeout = new Promise((_, no) => setTimeout(() => no(new Error("slow")), 2000));
+  Promise.race([copyText(url), timeout]).then(
+    () => setStatus("Link copied. Paste it into Messages, an email or anywhere else; whoever opens it sees this route."),
+    () => { setStatus("Your route link is below. Tap Copy, or select it and copy it yourself."); $("shareLink").select(); });
+}
+$("copyBtn").addEventListener("click", () => {
+  const inp = $("shareLink");
+  inp.focus(); inp.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) {}
+  if (ok) setStatus("Link copied.");
+  else tryCopy(inp.value);
+});
 $("share").addEventListener("click", () => {
-  if (!route || !shareUrl) return;
-  const url = shareUrl;
+  if (!route) return;
+  // If the short link is still being made, use the plain one so the button always works.
+  const url = shareUrl || location.origin + location.pathname + "#r=" + toB64(new TextEncoder().encode(JSON.stringify(packRoute(route))));
   // Phones get the share menu; computers get the link copied, ready to paste into Messages, email or anywhere.
   if (isPhone && navigator.share) {
-    navigator.share({ title: "My route", url }).catch(e => {
-      if (e.name !== "AbortError") copyText(url).then(() => setStatus("Link copied. Paste it into a text or email."), () => window.prompt("Copy this link:", url));
-    });
+    showShareBox(url);
+    navigator.share({ title: "My route", url }).catch(e => { if (e.name !== "AbortError") tryCopy(url); });
     return;
   }
-  copyText(url).then(
-    () => setStatus("Link copied. Paste it into Messages, an email or anywhere else; whoever opens it sees this route."),
-    () => window.prompt("Copy this link:", url));
+  tryCopy(url);
 });
 
 // ---------- Find my route ----------
