@@ -86,6 +86,17 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .pin.start { background: var(--fg); color: var(--bg); }
 .pin.late { background: var(--warn); color: #fff; }
 .pin.done { background: #8a948f; color: #fff; }
+.pin.group { width: auto; height: 28px; padding: 0 8px; border-radius: 99px; background: var(--fg); color: var(--bg); font-size: 12px; white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,.35), 3px 3px 0 -1px var(--accent), 3px 3px 0 1px #fff; cursor: pointer; }
+.grouplist { display: flex; flex-direction: column; margin-top: 8px; max-height: 240px; overflow: auto; }
+button.grouprow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 4px; background: none; border: 0; border-top: 1px solid var(--line);
+  border-radius: 0; color: var(--fg); font: 500 0.88rem/1.3 var(--body); text-align: left; cursor: pointer; }
+button.grouprow:first-child { border-top: 0; }
+button.grouprow:hover { background: var(--bg); }
+.grouprow .pin { flex: none; width: 24px; height: 24px; font-size: 11px; border-width: 1.5px; }
+.grouprow .pin.quick { border-radius: 50%; }
+.grouprow .gtext { min-width: 0; }
+.grouprow .gtext small { display: block; color: var(--muted); font: 500 0.75rem/1.2 var(--mono); }
 .leaflet-container .leaflet-popup-content-wrapper, .leaflet-container .leaflet-popup-tip { background: var(--surface); color: var(--fg); box-shadow: 0 8px 24px rgba(0,0,0,.3); }
 .leaflet-container .leaflet-popup-content { margin: 12px 14px; font: 0.9rem/1.4 var(--body); }
 .leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
@@ -332,7 +343,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 16 · Nov 7, 2026</p>
+  <p class="note">Version 17 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -1417,14 +1428,80 @@ function pinCard(i) {
   return card;
 }
 // Tapping a number in the stop list shows that stop on the map.
+const CARD_OPTS = { maxWidth: 280, minWidth: 220, autoPan: true, autoPanPaddingTopLeft: [20, 40], autoPanPaddingBottomRight: [20, 20], offset: [0, -10] };
+function pinLatLng(i) { const p = i ? route.stops[i - 1] : route.start; return L.latLng(p.lat, p.lon); }
+function openCard(i) { L.popup(CARD_OPTS).setLatLng(pinLatLng(i)).setContent(pinCard(i)).openOn(map); }
 function focusPin(i) {
-  const mk = markers[i];
-  if (!mk || !map) return;
+  if (!map || !route || i > route.stops.length) return;
   $("map").scrollIntoView({ behavior: "smooth", block: "center" });
-  // Put the pin low in the map so its card has room above it.
-  map.setView(mk.getLatLng(), Math.max(map.getZoom(), 14), { animate: false });
+  // Zoom close enough that the stop has its own pin, and put it low in the map so its card has room above it.
+  map.setView(pinLatLng(i), Math.max(map.getZoom(), 15), { animate: false });
   map.panBy([0, -Math.round($("map").clientHeight * 0.3)], { animate: false });
-  mk.openPopup();
+  openCard(i);
+}
+
+// ---------- Pins that would sit on top of each other are grouped into one badge ----------
+let pinLayer, pinData = [];
+const GROUP_PX = 30;
+function groupLabel(nums) {
+  // 1,2,3,4 → "1–4"; 2,5,7 → "2 · 5 · 7"; long mixes → "6 stops"
+  const run = nums.every((n, k) => !k || n === nums[k - 1] + 1);
+  if (run && nums.length > 2) return nums[0] + "–" + nums[nums.length - 1];
+  const txt = nums.join(" · ");
+  return txt.length <= 11 ? txt : nums.length + " stops";
+}
+function layoutPins() {
+  if (!map || !pinLayer) return;
+  pinLayer.clearLayers();
+  markers = [];
+  const groups = [];
+  for (const d of pinData) {
+    const pt = map.latLngToLayerPoint(d.ll);
+    const g = groups.find(g => g.pt.distanceTo(pt) < GROUP_PX);
+    if (g) g.items.push(d); else groups.push({ pt, items: [d] });
+  }
+  for (const g of groups) {
+    if (g.items.length === 1) {
+      const d = g.items[0];
+      const icon = L.divIcon({ className: "", html: '<div class="pin ' + d.cls + '">' + (d.i || "●") + "</div>",
+        iconSize: [26, 26], iconAnchor: d.quick ? [2, 30] : [13, 13] });
+      const mk = L.marker(d.ll, { icon, zIndexOffset: (d.quick ? 1000 : 0) + d.i, title: d.title, keyboard: true }).addTo(pinLayer);
+      mk.on("click", () => openCard(d.i));
+      markers[d.i] = mk;
+      continue;
+    }
+    const nums = g.items.map(d => d.i).sort((a, b) => a - b);
+    const label = groupLabel(nums.map(n => n || "●"));
+    const w = Math.max(34, 16 + label.length * 7.5);
+    const icon = L.divIcon({ className: "", html: '<div class="pin group" style="width:' + w + 'px">' + label + "</div>",
+      iconSize: [w, 28], iconAnchor: [w / 2, 14] });
+    const center = map.layerPointToLatLng(g.pt);
+    const mk = L.marker(center, { icon, zIndexOffset: 2000, title: "Stops " + nums.join(", ") + ". Tap to choose one.", keyboard: true }).addTo(pinLayer);
+    mk.on("click", () => L.popup({ ...CARD_OPTS, minWidth: 230 }).setLatLng(center).setContent(groupCard(nums, g.items.map(d => d.ll))).openOn(map));
+  }
+}
+// The list that opens from a group badge: tap a stop to see its card.
+function groupCard(nums, lls) {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const card = el("div", "pincard");
+  card.append(el("b", null, nums.length + " stops close together"));
+  const list = el("div", "grouplist"), sch = schedule(route, true);
+  for (const i of nums) {
+    const b = el("button", "grouprow"); b.type = "button";
+    const s = i ? route.stops[i - 1] : null;
+    const n = el("span", "pin " + (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (s && s.chain ? " quick" : ""), i ? String(i) : "●");
+    const txt = el("span", "gtext");
+    txt.append(el("span", null, i ? s.input.replace(/\s*@.*$/, "") : (route.start.label || "Start")));
+    txt.append(el("small", null, !i ? "Start" : s.done ? "Done" : sch[i - 1].skipped ? "Skipped" : "Arrive " + fmtClock(new Date(sch[i - 1].arrive))));
+    b.append(n, txt);
+    b.addEventListener("click", () => openCard(i));
+    list.append(b);
+  }
+  card.append(list);
+  const z = el("button", "mini", "Zoom in to separate them"); z.type = "button";
+  z.addEventListener("click", () => { map.closePopup(); map.fitBounds(L.latLngBounds(lls), { padding: [60, 60], maxZoom: 18 }); });
+  const acts = el("div", "acts"); acts.append(z); card.append(acts);
+  return card;
 }
 async function drawMap() {
   if (!window.L) { $("map").hidden = true; return; }
@@ -1434,25 +1511,23 @@ async function drawMap() {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }).addTo(map);
     layer = L.layerGroup().addTo(map);
+    pinLayer = L.layerGroup().addTo(map);
+    map.on("zoomend", layoutPins);
   }
   map.invalidateSize();
   layer.clearLayers();
-  markers = [];
   const r = route, sch = schedule(r, true);
   const all = [r.start, ...r.stops];
   const ll = all.map(p => [p.lat, p.lon]);
-  all.forEach((p, i) => {
+  pinData = all.map((p, i) => {
     const s = i ? r.stops[i - 1] : null;
-    const quick = s && s.chain;
-    const cls = (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (quick ? " quick" : "");
-    const icon = L.divIcon({ className: "", html: '<div class="pin ' + cls + '">' + (i || "●") + "</div>",
-      iconSize: [26, 26], iconAnchor: quick ? [2, 30] : [13, 13] });
-    const mk = L.marker([p.lat, p.lon], { icon, zIndexOffset: (quick ? 1000 : 0) + i, title: i ? (i + ". " + (s.label || s.input)) : "Start" }).addTo(layer);
-    mk.bindPopup(() => pinCard(i), { maxWidth: 280, minWidth: 220, autoPan: true, autoPanPaddingTopLeft: [20, 40], autoPanPaddingBottomRight: [20, 20] });
-    markers[i] = mk;
+    const quick = !!(s && s.chain);
     if (quick) L.circleMarker([p.lat, p.lon], { radius: 4, color: "#fff", weight: 2, fillColor: "#d97706", fillOpacity: 1 }).addTo(layer);
+    return { i, ll: L.latLng(p.lat, p.lon), quick, title: i ? (i + ". " + (s.label || s.input)) : "Start",
+      cls: (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (quick ? " quick" : "") };
   });
-  map.fitBounds(ll, { padding: [30, 30], maxZoom: 15 });
+  map.fitBounds(ll, { padding: [30, 30], maxZoom: 15, animate: false });
+  layoutPins();
 
   const key = ll.map(p => p.join(",")).join(";");
   let path = pathCache.key === key ? pathCache.path : null;
