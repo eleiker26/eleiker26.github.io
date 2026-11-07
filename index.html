@@ -103,6 +103,9 @@ li.done { opacity: 0.55; }
 .note.warn { color: var(--warn); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .addbox { margin-top: -8px; }
+.addpanel { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.addpanel .hint { margin: 0; }
+.addpanel label.top { margin-bottom: 0; }
 .sharebox input { font-family: var(--mono); font-size: 0.85rem; }
 .addrow { display: flex; gap: 10px; }
 .addrow input { flex: 1; min-width: 0; }
@@ -152,12 +155,16 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
   <p id="status" class="status" role="status" aria-live="polite"></p>
 
   <div class="addbox">
-    <label class="top" for="addStop">Add a stop <span>optional</span></label>
-    <div class="addrow">
+    <button id="addOpen" type="button" class="secondary">+ Add a stop</button>
+    <div id="addPanel" class="addpanel" hidden>
+      <label class="top" for="addStop">New stop</label>
       <input id="addStop" type="text" placeholder="Address or store name, like Shell" autocomplete="off">
-      <button id="addBtn" type="button" class="secondary">Add</button>
+      <p id="addHint" class="hint"></p>
+      <div class="row">
+        <button id="addBtn" type="button">Add stop to today's route</button>
+        <button id="addCancel" type="button" class="secondary">Cancel</button>
+      </div>
     </div>
-    <p id="addHint" class="hint">Adds it to your stops above.</p>
   </div>
 
   <section id="result" hidden>
@@ -171,7 +178,6 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="doneNote" class="note" hidden></p>
     <p id="paceNote" class="pace" hidden></p>
     <ol id="list"></ol>
-    <p class="note">Check off stops as you go. If you skip one or fall behind, tap Re-plan to reorder what's left from where you are.</p>
     <div class="links" id="links"></div>
     <p id="linkNote" class="note" hidden></p>
     <div class="row">
@@ -188,7 +194,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 10 · Nov 7, 2026</p>
+  <p class="note">Version 11 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -699,7 +705,7 @@ function renderTotals() {
 let editingNote = -1;
 function render() {
   renderList(); renderRest();
-  $("addHint").textContent = "Fits it into the route you're driving, starting from where you are now.";
+  updateAddUI();
 }
 function renderList() {
   const r = route, list = $("list"), sch = schedule(r, true);
@@ -816,28 +822,27 @@ const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (naviga
 function renderLinks() {
   const wrap = $("links");
   wrap.replaceChildren();
-  const rem = route.stops.map((s, i) => ({ s, n: i + 1 })).filter(x => !x.s.done);
-  const anyDone = route.stops.some(s => s.done);
-  if (!rem.length) { $("linkNote").hidden = true; return; }
+  $("linkNote").hidden = true;
+  const rem = route.stops.filter(s => !s.done);
+  if (!rem.length) return;
+  // Google Maps takes a limited number of stops per link (fewer on phones), so the button
+  // opens as many of your next stops as it can; check those off and it moves on to the rest.
   const per = isPhone ? 4 : 10;
+  const go = rem.slice(0, per);
+  const anyDone = route.stops.some(s => s.done);
   const enc = p => p.lat.toFixed(6) + "," + p.lon.toFixed(6);
-  const chunks = [];
-  for (let i = 0; i < rem.length; i += per) chunks.push(rem.slice(i, i + per));
-  chunks.forEach((c, k) => {
-    const origin = k === 0 ? (anyDone ? null : route.start) : chunks[k - 1][chunks[k - 1].length - 1].s;
-    let url = "https://www.google.com/maps/dir/?api=1&travelmode=driving" +
-      (origin ? "&origin=" + enc(origin) : "") + "&destination=" + enc(c[c.length - 1].s);
-    const wp = c.slice(0, -1).map(x => enc(x.s));
-    if (wp.length) url += "&waypoints=" + encodeURIComponent(wp.join("|"));
-    const a = document.createElement("a");
-    a.className = "btn" + (k ? " secondary" : "");
-    a.href = url; a.target = "_blank"; a.rel = "noopener";
-    a.textContent = chunks.length === 1 ? "Open in Google Maps"
-      : "Google Maps, part " + (k + 1) + " of " + chunks.length + " (stops " + c[0].n + "–" + c[c.length - 1].n + ")";
-    wrap.append(a);
-  });
-  $("linkNote").hidden = chunks.length === 1;
-  $("linkNote").textContent = "Google Maps takes only a few stops per link" + (isPhone ? " on phones" : "") + ", so the route is split into parts. Open the next part when you finish the one before.";
+  let url = "https://www.google.com/maps/dir/?api=1&travelmode=driving" +
+    (anyDone ? "" : "&origin=" + enc(route.start)) + "&destination=" + enc(go[go.length - 1]);
+  const wp = go.slice(0, -1).map(enc);
+  if (wp.length) url += "&waypoints=" + encodeURIComponent(wp.join("|"));
+  const a = document.createElement("a");
+  a.className = "btn"; a.href = url; a.target = "_blank"; a.rel = "noopener";
+  a.textContent = "Open route in Google Maps";
+  wrap.append(a);
+  if (rem.length > per) {
+    $("linkNote").textContent = "Google Maps opens your next " + per + " stops. Check them off as you go, then tap the button again for the rest.";
+    $("linkNote").hidden = false;
+  }
 }
 
 // Map: numbered pins plus the actual driving path (straight lines if the road service is down).
@@ -985,7 +990,95 @@ async function replanRoute(extra) {
   }
 }
 
-// ---------- Add a stop to a route you're already driving ----------
+// ---------- Add a stop at any time of day ----------
+function updateAddUI() {
+  $("addBtn").textContent = route ? "Add stop to today's route" : "Add to my stops";
+  $("addHint").textContent = route
+    ? "Gas or food goes in as your next stop, at the location with the least detour. A new address goes wherever it adds the fewest miles. The rest of your route stays in the same order."
+    : "It joins your stops above.";
+}
+function closeAdd() { $("addPanel").hidden = true; $("addOpen").hidden = false; $("addStop").value = ""; }
+$("addOpen").addEventListener("click", () => {
+  updateAddUI();
+  $("addOpen").hidden = true; $("addPanel").hidden = false; $("addStop").focus();
+});
+$("addCancel").addEventListener("click", closeAdd);
+updateAddUI();
+
+// Where you are now: your location if the browser shares it, otherwise your last finished stop.
+async function whereNow() {
+  try { return { ...(await getLocation()), label: "Your location", live: true }; }
+  catch (e) {
+    let last = null;
+    route.stops.forEach(s => { if (s.done) last = s; });
+    const p = last || route.start;
+    return { lat: p.lat, lon: p.lon, label: last ? (last.label || last.input) : (route.start.label || "your start"), live: false };
+  }
+}
+
+// A pit stop slips into today's route; every other stop keeps its place and its check-off.
+async function addToRoute(it) {
+  const r = route, n = r.stops.length;
+  const firstOpen = r.stops.findIndex(s => !s.done);
+  const base = firstOpen < 0 ? n : firstOpen;
+  const buttons = [btn, $("replan"), $("share"), $("addBtn")];
+  buttons.forEach(b => b.disabled = true);
+  try {
+    setStatus("Getting your location…");
+    const here = await whereNow();
+    const nextStop = r.stops[base] || null;
+    setStatus("Looking up “" + (it.chain || it.text) + "”…");
+    if (it.chain) {
+      it.candidates = await findBranches(it.chain, nextStop ? [here, nextStop] : [here], 16000, 8);
+      if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near you or your next stop. Try a different name, or type a specific address.");
+    } else {
+      const g = await geocode(it.text, here);
+      if (!g) throw new Error("Couldn't find “" + it.text + "”. Check the spelling and add a city and state, then try again.");
+      Object.assign(it, g);
+    }
+    const cands = it.candidates || [{ lat: it.lat, lon: it.lon, label: it.label }];
+    // Points: 0 = start, 1..n = stops, n+1 = where you are, then each possible location.
+    const pts = [r.start, ...r.stops, here, ...cands];
+    const H = n + 1, C0 = n + 2;
+    setStatus("Fitting it into your route…");
+    let M;
+    try { M = await roadMatrix(pts); } catch (e) { M = straightMatrix(pts); }
+    if (!M.dur) M.dur = straightMatrix(pts).dur;
+    // Gas or food goes next. A new address can go in any open spot; pick the one that adds the fewest miles.
+    const slots = it.chain ? [base] : Array.from({ length: n - base + 1 }, (_, j) => base + j);
+    let best = null;
+    cands.forEach((c, j) => {
+      const ci = C0 + j;
+      for (const k of slots) {
+        const prev = k === base ? H : k, next = k < n ? k + 1 : null;
+        const a = M.dist[prev][ci], b = next != null ? M.dist[ci][next] : 0, old = next != null ? M.dist[prev][next] : 0;
+        if (a == null || b == null || old == null) continue;
+        const extra = a + b - old;
+        if (!best || extra < best.extra) best = { extra, k, ci, c, prev, next };
+      }
+    });
+    if (!best) throw new Error("Couldn't find a drivable way to fit that stop into your route.");
+    const k = best.k;
+    const stop = { input: it.input, label: best.c.label || it.label || it.input, lat: best.c.lat, lon: best.c.lon,
+      win: it.win || null, chain: it.chain || null, pin: false, note: it.note || "", done: false };
+    r.stops.splice(k, 0, stop);
+    r.legs.splice(k, 0, { d: M.dist[best.prev][best.ci], t: M.dur[best.prev][best.ci] });
+    if (best.next != null) r.legs[k + 1] = { d: M.dist[best.ci][best.next], t: M.dur[best.ci][best.next] };
+    r.plan = null;
+    await fillStoreAddresses({ stops: [stop] });
+    editingNote = -1;
+    setRoute(r);
+    closeAdd();
+    const extraMi = Math.max(0, best.extra);
+    setStatus("Added “" + it.input + "” as stop " + (k + 1) + (k === base ? ", your next stop" : "") + ". It adds about " + miles(extraMi) + " to your day.");
+  } catch (err) {
+    setStatus(err.message || "Something went wrong. Try again.", true);
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+// ---------- (older) Add a stop by re-planning everything ----------
 async function resolveExtra(it, rem) {
   const anchors = [...rem, route.start];
   setStatus("Looking up “" + (it.chain || it.text) + "”…");
@@ -1006,14 +1099,14 @@ function addStop() {
     if (lines().length >= MAX) return setStatus("You already have " + MAX + " stops, the most one route can hold.", true);
     box.value = box.value.replace(/\s*$/, "") + (box.value.trim() ? "\n" : "") + raw;
     updateCount();
-    $("addStop").value = "";
+    closeAdd();
     return setStatus("Added “" + raw + "” to your stops. Tap Find my route when you're ready.");
   }
   if (route.stops.filter(s => !s.done).length >= MAX) return setStatus("A route can hold " + MAX + " stops at a time. Check off or finish one first.", true);
   let it;
   try { it = parseLine(raw, route.stops.length); } catch (e) { return setStatus(e.message, true); }
   it.note = savedNote(raw);
-  replanRoute(it);
+  addToRoute(it);
 }
 $("addBtn").addEventListener("click", addStop);
 $("addStop").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addStop(); } });
