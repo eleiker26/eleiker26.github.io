@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shortest Stop Route</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: one narrow column — address box, one button, then the ordered stop list. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --fg: #16201c;
+  --muted: #5d6b65;
+  --line: #d6ddd9;
+  --accent: #0b7a5a;
+  --accent-fg: #ffffff;
+  --warn: #a34a12;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101614; --surface: #18201d; --fg: #e6ece9; --muted: #95a39d;
+    --line: #2b3632; --accent: #3fc495; --accent-fg: #06140f; --warn: #f0a46c;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.5 var(--body);
+  padding-block: 32px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1 { font: 800 1.9rem/1.1 var(--display); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.sub { margin: 6px 0 0; color: var(--muted); }
+label { display: flex; justify-content: space-between; font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; }
+label span { font-family: var(--mono); letter-spacing: 0; }
+label span.over { color: var(--warn); }
+textarea {
+  width: 100%; min-height: 230px; resize: vertical;
+  font: 1rem/1.7 var(--body); color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px;
+}
+textarea:focus-visible, button:focus-visible, a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button, .btn {
+  display: block; width: 100%; text-align: center; text-decoration: none;
+  font: 700 1.05rem/1 var(--display); letter-spacing: 0.01em;
+  padding: 16px; border-radius: 10px; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg);
+}
+button:disabled { opacity: 0.55; cursor: progress; }
+.status { margin: 0; color: var(--muted); min-height: 1.5em; }
+.status.error { color: var(--warn); }
+#result { display: flex; flex-direction: column; gap: 14px; }
+.totals { display: flex; gap: 24px; flex-wrap: wrap; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.totals b { display: block; font: 800 1.5rem/1.1 var(--display); }
+.totals small { color: var(--muted); font-size: 0.8rem; }
+ol { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+li { display: grid; grid-template-columns: 2rem 1fr auto; gap: 10px; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); }
+li:first-child { border-top: 0; }
+.n { font: 700 0.95rem/1 var(--mono); color: var(--accent); }
+.addr { min-width: 0; overflow-wrap: anywhere; }
+.addr small { display: block; color: var(--muted); font-size: 0.8rem; }
+.leg { font: 500 0.85rem/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+@media (prefers-reduced-motion: no-preference) { #result:not([hidden]) { animation: in .25s ease-out; } }
+@keyframes in { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Shortest Stop Route</h1>
+    <p class="sub">Enter up to 10 addresses. The route starts where you are now and visits every stop with the least total driving.</p>
+  </header>
+
+  <form id="form">
+    <label for="addresses">Addresses, one per line <span id="count">0 / 10</span></label>
+    <textarea id="addresses" spellcheck="false" placeholder="1600 Pennsylvania Ave NW, Washington, DC&#10;400 Broad St, Seattle, WA&#10;..."></textarea>
+  </form>
+
+  <button id="go" type="submit" form="form">Find my route</button>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <section id="result" hidden>
+    <div class="totals">
+      <div><b id="tDist">–</b><small>total distance</small></div>
+      <div><b id="tTime">–</b><small>drive time</small></div>
+    </div>
+    <ol id="list"></ol>
+    <a id="maps" class="btn" href="#" target="_blank" rel="noopener">Open in Google Maps</a>
+    <p id="note" class="note"></p>
+  </section>
+</main>
+
+<script>
+const MAX = 10;
+const $ = id => document.getElementById(id);
+const box = $("addresses"), btn = $("go"), statusEl = $("status");
+
+try { box.value = localStorage.getItem("stops") || ""; } catch (e) {}
+const lines = () => box.value.split("\n").map(s => s.trim()).filter(Boolean);
+function updateCount() {
+  const n = lines().length;
+  $("count").textContent = n + " / " + MAX;
+  $("count").className = n > MAX ? "over" : "";
+  try { localStorage.setItem("stops", box.value); } catch (e) {}
+}
+box.addEventListener("input", updateCount);
+updateCount();
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = "status" + (isError ? " error" : "");
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("This browser can't share your location."));
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      err => reject(new Error(err.code === 1
+        ? "Location access was blocked. Allow location for this site in your browser settings, then try again."
+        : "Couldn't get your location. Check that location services are on, then try again.")),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    );
+  });
+}
+
+// Free OpenStreetMap geocoder. Allows 1 request per second, so lookups run one at a time.
+async function geocode(q, near) {
+  const d = 1.5; // prefer results within ~100 miles of you
+  const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q) +
+    "&viewbox=" + [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(",");
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error("The address lookup service didn't respond. Try again in a minute.");
+  const data = await res.json();
+  if (!data.length) return null;
+  return { lat: +data[0].lat, lon: +data[0].lon, label: data[0].display_name };
+}
+
+// Real road distances between every pair of points (OSRM public server).
+async function roadMatrix(pts) {
+  const coords = pts.map(p => p.lon.toFixed(6) + "," + p.lat.toFixed(6)).join(";");
+  const res = await fetch("https://router.project-osrm.org/table/v1/driving/" + coords + "?annotations=distance,duration");
+  if (!res.ok) throw new Error("routing");
+  const j = await res.json();
+  if (j.code !== "Ok" || !j.distances) throw new Error("routing");
+  return { dist: j.distances, dur: j.durations };
+}
+
+// Fallback: straight-line distance if the road service is down.
+function straightMatrix(pts) {
+  const R = 6371000, rad = x => x * Math.PI / 180;
+  const dist = pts.map(a => pts.map(b => {
+    const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+    const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }));
+  return { dist, dur: null };
+}
+
+// Exact shortest open path starting at point 0 that visits every other point once (Held–Karp).
+function bestOrder(D) {
+  const n = D.length - 1; // stops, excluding the start
+  if (n === 1) return [1];
+  const FULL = 1 << n, INF = Infinity;
+  const cost = Array.from({ length: FULL }, () => new Float64Array(n).fill(INF));
+  const prev = Array.from({ length: FULL }, () => new Int8Array(n).fill(-1));
+  for (let i = 0; i < n; i++) cost[1 << i][i] = D[0][i + 1] ?? INF;
+  for (let mask = 1; mask < FULL; mask++) {
+    for (let last = 0; last < n; last++) {
+      const c = cost[mask][last];
+      if (!(mask & (1 << last)) || c === INF) continue;
+      for (let nx = 0; nx < n; nx++) {
+        if (mask & (1 << nx)) continue;
+        const step = D[last + 1][nx + 1];
+        if (step == null) continue;
+        const m2 = mask | (1 << nx), v = c + step;
+        if (v < cost[m2][nx]) { cost[m2][nx] = v; prev[m2][nx] = last; }
+      }
+    }
+  }
+  let mask = FULL - 1, last = 0;
+  for (let i = 1; i < n; i++) if (cost[mask][i] < cost[mask][last]) last = i;
+  if (cost[mask][last] === INF) throw new Error("No drivable route connects all of these stops.");
+  const order = [];
+  while (last !== -1) { order.unshift(last + 1); const p = prev[mask][last]; mask ^= 1 << last; last = p; }
+  return order;
+}
+
+const miles = m => (m / 1609.344).toFixed(m < 16093 ? 1 : 0) + " mi";
+function hm(s) {
+  const m = Math.round(s / 60);
+  return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+
+function render(start, stops, order, M, isRoad) {
+  const list = $("list");
+  list.replaceChildren();
+  let total = 0, time = 0, from = 0;
+  const addRow = (n, title, sub, leg) => {
+    const li = document.createElement("li");
+    li.innerHTML = '<span class="n"></span><span class="addr"></span><span class="leg"></span>';
+    li.children[0].textContent = n;
+    li.children[1].textContent = title;
+    if (sub) { const s = document.createElement("small"); s.textContent = sub; li.children[1].append(s); }
+    li.children[2].textContent = leg;
+    list.append(li);
+  };
+  addRow("●", "Your location", null, "start");
+  order.forEach((idx, k) => {
+    const d = M.dist[from][idx]; total += d;
+    if (M.dur) time += M.dur[from][idx];
+    addRow(String(k + 1), stops[idx - 1].input, stops[idx - 1].label, "+" + miles(d));
+    from = idx;
+  });
+  $("tDist").textContent = miles(total);
+  $("tTime").textContent = M.dur ? hm(time) : "–";
+
+  const pts = order.map(i => stops[i - 1]);
+  const enc = p => p.lat.toFixed(6) + "," + p.lon.toFixed(6);
+  const dest = pts[pts.length - 1];
+  let url = "https://www.google.com/maps/dir/?api=1&travelmode=driving" +
+    "&origin=" + enc(start) + "&destination=" + enc(dest);
+  if (pts.length > 1) url += "&waypoints=" + encodeURIComponent(pts.slice(0, -1).map(enc).join("|"));
+  $("maps").href = url;
+
+  $("note").textContent = isRoad
+    ? "Order is based on road driving distance. The route ends at the last stop."
+    : "The road routing service didn't respond, so this order uses straight-line distance. It may not be the shortest drive.";
+  $("result").hidden = false;
+}
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const list = lines();
+  if (!list.length) return setStatus("Enter at least one address.", true);
+  if (list.length > MAX) return setStatus("That's " + list.length + " addresses. Remove some so there are 10 or fewer.", true);
+
+  btn.disabled = true;
+  $("result").hidden = true;
+  try {
+    setStatus("Getting your location…");
+    const start = await getLocation();
+
+    const stops = [];
+    for (let i = 0; i < list.length; i++) {
+      setStatus("Looking up address " + (i + 1) + " of " + list.length + "…");
+      if (i > 0) await sleep(1100);
+      const g = await geocode(list[i], start);
+      if (!g) throw new Error("Couldn't find “" + list[i] + "”. Add a city and state, then try again.");
+      stops.push({ input: list[i], ...g });
+    }
+
+    setStatus("Finding the shortest route…");
+    const pts = [start, ...stops];
+    let M, isRoad = true;
+    try { M = await roadMatrix(pts); } catch (err) { M = straightMatrix(pts); isRoad = false; }
+    const order = bestOrder(M.dist);
+    render(start, stops, order, M, isRoad);
+    setStatus("");
+  } catch (err) {
+    setStatus(err.message || "Something went wrong. Try again.", true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
