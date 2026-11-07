@@ -29,6 +29,13 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
+#startWrap { margin-bottom: 18px; }
+#start {
+  width: 100%; font: 1rem/1.5 var(--body); color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+}
+#start:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 html, body { margin: 0; }
 body {
   background: var(--bg); color: var(--fg);
@@ -79,11 +86,15 @@ li:first-child { border-top: 0; }
 <main>
   <header>
     <h1>Shortest Stop Route</h1>
-    <p class="sub">Enter up to 10 addresses. The route starts where you are now and visits every stop with the least total driving.</p>
+    <p class="sub">Enter up to 10 stops. The route starts at your current address and visits every stop with the least total driving.</p>
   </header>
 
   <form id="form">
-    <label for="addresses">Addresses, one per line <span id="count">0 / 10</span></label>
+    <div id="startWrap">
+      <label for="start">Your current address <span>optional</span></label>
+      <input id="start" type="text" autocomplete="street-address" placeholder="Leave blank to use your location">
+    </div>
+    <label for="addresses">Stops, one per line <span id="count">0 / 10</span></label>
     <textarea id="addresses" spellcheck="false" placeholder="1600 Pennsylvania Ave NW, Washington, DC&#10;400 Broad St, Seattle, WA&#10;..."></textarea>
   </form>
 
@@ -106,7 +117,8 @@ const MAX = 10;
 const $ = id => document.getElementById(id);
 const box = $("addresses"), btn = $("go"), statusEl = $("status");
 
-try { box.value = localStorage.getItem("stops") || ""; } catch (e) {}
+try { box.value = localStorage.getItem("stops") || ""; $("start").value = localStorage.getItem("start") || ""; } catch (e) {}
+$("start").addEventListener("input", () => { try { localStorage.setItem("start", $("start").value); } catch (e) {} });
 const lines = () => box.value.split("\n").map(s => s.trim()).filter(Boolean);
 function updateCount() {
   const n = lines().length;
@@ -123,24 +135,29 @@ function setStatus(msg, isError) {
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function getLocation() {
+function tryLocation(opts) {
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) return reject(new Error("This browser can't share your location."));
     navigator.geolocation.getCurrentPosition(
       p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
-      err => reject(new Error(err.code === 1
-        ? "Location access was blocked. Allow location for this site in your browser settings, then try again."
-        : "Couldn't get your location. Check that location services are on, then try again.")),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-    );
+      err => reject(err), opts);
   });
+}
+// Try precise GPS first, then the faster Wi-Fi/network estimate that most laptops use.
+async function getLocation() {
+  if (!navigator.geolocation) throw { code: 0 };
+  try {
+    return await tryLocation({ enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 });
+  } catch (err) {
+    if (err.code === 1) throw err;
+    return await tryLocation({ enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 });
+  }
 }
 
 // Free OpenStreetMap geocoder. Allows 1 request per second, so lookups run one at a time.
 async function geocode(q, near) {
   const d = 1.5; // prefer results within ~100 miles of you
-  const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q) +
-    "&viewbox=" + [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(",");
+  let url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + encodeURIComponent(q);
+  if (near) url += "&viewbox=" + [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(",");
   const res = await fetch(url, { headers: { "Accept": "application/json" } });
   if (!res.ok) throw new Error("The address lookup service didn't respond. Try again in a minute.");
   const data = await res.json();
@@ -217,7 +234,7 @@ function render(start, stops, order, M, isRoad) {
     li.children[2].textContent = leg;
     list.append(li);
   };
-  addRow("●", "Your location", null, "start");
+  addRow("●", start.label || "Your location", null, "start");
   order.forEach((idx, k) => {
     const d = M.dist[from][idx]; total += d;
     if (M.dur) time += M.dur[from][idx];
@@ -250,8 +267,25 @@ $("form").addEventListener("submit", async e => {
   btn.disabled = true;
   $("result").hidden = true;
   try {
-    setStatus("Getting your location…");
-    const start = await getLocation();
+    let start;
+    const typedStart = $("start").value.trim();
+    if (typedStart) {
+      setStatus("Looking up your starting address…");
+      const g = await geocode(typedStart, null);
+      if (!g) throw new Error("Couldn't find your current address “" + typedStart + "”. Add a city and state, then try again.");
+      start = { ...g, label: typedStart };
+      await sleep(1100);
+    } else {
+      setStatus("Getting your location…");
+      try {
+        start = await getLocation();
+      } catch (err) {
+        $("start").focus();
+        throw new Error(err.code === 1
+          ? "Your browser blocked location for this site. Type your current address in the box above, then tap Find my route."
+          : "Your browser couldn't find your location. Type your current address in the box above, then tap Find my route.");
+      }
+    }
 
     const stops = [];
     for (let i = 0; i < list.length; i++) {
