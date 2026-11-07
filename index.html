@@ -86,6 +86,7 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .pin.start { background: var(--fg); color: var(--bg); }
 .pin.late { background: var(--warn); color: #fff; }
 .pin.done { background: #8a948f; color: #fff; }
+.pin.quick { background: #d97706; color: #fff; border-radius: 50% 50% 50% 0; }
 ol { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
 li { display: grid; grid-template-columns: 1.4rem 1.6rem 1fr auto; gap: 8px; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); }
 li:first-child { border-top: 0; }
@@ -156,7 +157,7 @@ li.done { opacity: 0.55; }
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 6 · Nov 7, 2026</p>
+  <p class="note">Version 7 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -383,12 +384,18 @@ async function overpassFind(term, anchors, radius) {
                 : "nwr" + f + ar + ";";
   }).join("");
   const q = "[out:json][timeout:25];(" + parts + ");out center 300;";
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST", body: "data=" + encodeURIComponent(q),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" }
-  });
-  if (!res.ok) throw new Error("overpass");
-  const j = await res.json();
+  let j = null;
+  for (const server of ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"]) {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const res = await fetch(server, {
+        method: "POST", body: "data=" + encodeURIComponent(q), signal: ctl.signal,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" }
+      });
+      if (res.ok) { j = await res.json(); break; }
+    } catch (e) {} finally { clearTimeout(timer); }
+  }
+  if (!j) throw new Error("overpass");
   return (j.elements || []).map(e => {
     const tg = e.tags || {};
     const street = [tg["addr:housenumber"], tg["addr:street"]].filter(Boolean).join(" ");
@@ -402,9 +409,15 @@ async function nominatimFind(term, anchors) {
   await nomGate();
   const lats = anchors.map(p => p.lat), lons = anchors.map(p => p.lon), pad = 0.2;
   const vb = [Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad, Math.min(...lats) - pad];
-  const res = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=15&bounded=1&viewbox=" + vb.join(",") + "&q=" + encodeURIComponent(term));
+  const res = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&viewbox=" + vb.join(",") + "&q=" + encodeURIComponent(term));
   if (!res.ok) throw new Error("http");
-  return (await res.json()).map(d => ({ lat: +d.lat, lon: +d.lon, label: d.display_name }));
+  const { cat, name } = storeQuery(term);
+  const nameRe = name ? new RegExp("^" + name, "i") : null;
+  const kind = cat && /\["(\w+)"[=~]"\^?\(?([\w|]+)\)?\$?"\]/.exec(cat);
+  return (await res.json()).filter(d =>
+    (!nameRe || nameRe.test(d.name || "")) &&
+    (!kind || (d.category === kind[1] && kind[2].split("|").includes(d.type)))
+  ).map(d => ({ lat: +d.lat, lon: +d.lon, label: d.display_name }));
 }
 async function findBranches(term, anchors, radius, limit) {
   let found = [];
@@ -417,12 +430,21 @@ async function findBranches(term, anchors, radius, limit) {
     if (out.every(q => hav(p, q) > 150)) out.push(p);
     if (out.length === limit) break;
   }
-  if (!out.length) {
-    // Last try: treat it as a named place ("Columbus Zoo", "Cleveland, OH").
+  if (!out.length && term.includes(",")) {
+    // A town or place written like "Cleveland, OH".
     const g = await geocode(term, anchors[0]).catch(() => null);
-    if (g && (term.includes(",") || near(g) <= 150000)) out.push(g);
+    if (g) out.push(g);
   }
   return out;
+}
+
+async function streetAddress(p) {
+  await nomGate();
+  const res = await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=" + p.lat + "&lon=" + p.lon);
+  if (!res.ok) return null;
+  const a = (await res.json()).address || {};
+  const street = [a.house_number, a.road].filter(Boolean).join(" ");
+  return [street, a.city || a.town || a.village || a.hamlet, a.state].filter(Boolean).join(", ") || null;
 }
 
 // ---------- Distances ----------
@@ -633,6 +655,8 @@ function render() {
   $("warnNote").hidden = !lateN;
   $("warnNote").textContent = lateN ? "No order gets to every stop on time. " + lateN + (lateN === 1 ? " stop is" : " stops are") + " marked late; this order keeps the lateness as small as possible." : "";
   $("result").hidden = false;
+  shareUrl = "";
+  prepareShare();
   drawMap();
 }
 
@@ -683,9 +707,12 @@ async function drawMap() {
   const ll = all.map(p => [p.lat, p.lon]);
   all.forEach((p, i) => {
     const s = i ? r.stops[i - 1] : null;
-    const cls = !i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "";
-    const icon = L.divIcon({ className: "", html: '<div class="pin ' + cls + '">' + (i || "●") + "</div>", iconSize: [26, 26], iconAnchor: [13, 13] });
-    L.marker([p.lat, p.lon], { icon, title: i ? (i + ". " + (s.label || s.input)) : "Start" }).addTo(layer);
+    const quick = s && s.chain;
+    const cls = (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (quick ? " quick" : "");
+    const icon = L.divIcon({ className: "", html: '<div class="pin ' + cls + '">' + (i || "●") + "</div>",
+      iconSize: [26, 26], iconAnchor: quick ? [2, 30] : [13, 13] });
+    L.marker([p.lat, p.lon], { icon, zIndexOffset: (quick ? 1000 : 0) + i, title: i ? (i + ". " + (s.label || s.input)) : "Start" }).addTo(layer);
+    if (quick) L.circleMarker([p.lat, p.lon], { radius: 4, color: "#fff", weight: 2, fillColor: "#d97706", fillOpacity: 1 }).addTo(layer);
   });
   map.fitBounds(ll, { padding: [30, 30], maxZoom: 15 });
 
@@ -762,15 +789,30 @@ $("replan").addEventListener("click", async () => {
 });
 
 // ---------- Share as a link (the whole route is in the link; nothing is uploaded) ----------
-const b64e = s => { let bin = ""; new TextEncoder().encode(s).forEach(b => bin += String.fromCharCode(b)); return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
-const b64d = s => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0)));
+// The route is packed into short arrays and compressed, so the link stays short enough for Messages.
+const toB64 = bytes => { let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b)); return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const fromB64 = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+async function squeeze(bytes, how) {
+  const stream = new Blob([bytes]).stream().pipeThrough(how === "zip" ? new CompressionStream("deflate-raw") : new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 const r5 = x => Math.round(x * 1e5) / 1e5;
+const short = t => (t || "").length > 70 ? t.slice(0, 67) + "…" : (t || "");
 function packRoute(r) {
+  return [2, r.dep, r.stay || 0, r.isRoad ? 1 : 0, [r5(r.start.lat), r5(r.start.lon), short(r.start.label)],
+    r.stops.map((s, i) => [s.input, s.label && s.label !== s.input ? short(s.label) : "", r5(s.lat), r5(s.lon),
+      s.win ? s.win.open : null, s.win ? s.win.close : null, s.chain ? 1 : 0, s.pin ? 1 : 0,
+      Math.round(r.legs[i].d || 0), Math.round(r.legs[i].t || 0)])];
+}
+function unpackRoute(a) {
+  if (!Array.isArray(a) || a[0] !== 2) return a; // older links were plain objects
+  const [, dep, stay, isRoad, st, ps] = a;
   return {
-    v: 1, dep: r.dep, stay: r.stay || 0, isRoad: r.isRoad,
-    start: { lat: r5(r.start.lat), lon: r5(r.start.lon), label: r.start.label },
-    stops: r.stops.map(s => ({ input: s.input, label: s.label, lat: r5(s.lat), lon: r5(s.lon), win: s.win, chain: s.chain ? 1 : null, pin: s.pin ? 1 : 0 })),
-    legs: r.legs.map(l => ({ d: Math.round(l.d || 0), t: Math.round(l.t || 0) }))
+    v: 1, dep, stay, isRoad: !!isRoad, doneBefore: 0,
+    start: { lat: st[0], lon: st[1], label: st[2] },
+    stops: ps.map(x => ({ input: x[0], label: x[1] || x[0], lat: x[2], lon: x[3],
+      win: x[4] != null || x[5] != null ? { open: x[4], close: x[5] } : null, chain: x[6] ? 1 : null, pin: !!x[7], done: false })),
+    legs: ps.map(x => ({ d: x[8], t: x[9] }))
   };
 }
 function validRoute(r) {
@@ -778,19 +820,35 @@ function validRoute(r) {
   return r && ok(r.start) && Array.isArray(r.stops) && r.stops.length && r.stops.length <= 40 &&
     r.stops.every(ok) && Array.isArray(r.legs) && r.legs.length === r.stops.length && isFinite(r.dep);
 }
-$("share").addEventListener("click", async () => {
-  if (!route) return;
-  const url = location.origin + location.pathname + "#r=" + b64e(JSON.stringify(packRoute(route)));
-  if (navigator.share) {
-    try { await navigator.share({ title: "My route", url }); return; }
-    catch (e) { if (e.name === "AbortError") return; }
+// Built ahead of time: Safari only allows sharing or copying right when the button is tapped.
+let shareUrl = "";
+async function prepareShare() {
+  const json = new TextEncoder().encode(JSON.stringify(packRoute(route)));
+  const base = location.origin + location.pathname;
+  try { shareUrl = base + "#z=" + toB64(await squeeze(json, "zip")); }
+  catch (e) { shareUrl = base + "#r=" + toB64(json); }
+}
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.append(ta); ta.select();
+  const ok = document.execCommand("copy"); ta.remove();
+  return ok ? Promise.resolve() : Promise.reject(new Error("copy"));
+}
+$("share").addEventListener("click", () => {
+  if (!route || !shareUrl) return;
+  const url = shareUrl;
+  // Phones get the share menu; computers get the link copied, ready to paste into Messages, email or anywhere.
+  if (isPhone && navigator.share) {
+    navigator.share({ title: "My route", url }).catch(e => {
+      if (e.name !== "AbortError") copyText(url).then(() => setStatus("Link copied. Paste it into a text or email."), () => window.prompt("Copy this link:", url));
+    });
+    return;
   }
-  try {
-    await navigator.clipboard.writeText(url);
-    setStatus("Link copied. Anyone who opens it sees this route and can open it in Google Maps.");
-  } catch (e) {
-    window.prompt("Copy this link:", url);
-  }
+  copyText(url).then(
+    () => setStatus("Link copied. Paste it into Messages, an email or anywhere else; whoever opens it sees this route."),
+    () => window.prompt("Copy this link:", url));
 });
 
 // ---------- Find my route ----------
@@ -857,6 +915,12 @@ $("form").addEventListener("submit", async e => {
     }
 
     const r = await optimize(start, items, dep, stay);
+    for (const s of r.stops) {
+      if (!s.chain || /\d/.test(s.label)) continue;
+      setStatus("Getting the address of " + s.label + "…");
+      const addr = await streetAddress(s).catch(() => null);
+      if (addr) s.label = s.label.split(",")[0] + " — " + addr;
+    }
     setRoute(r);
     setStatus("");
     if (location.hash) history.replaceState(null, "", location.pathname);
@@ -868,11 +932,13 @@ $("form").addEventListener("submit", async e => {
 });
 
 // ---------- On load: a shared link, or the route you were last working on ----------
-(function init() {
-  const h = /#r=([\w-]+)/.exec(location.hash);
+(async function init() {
+  const h = /#([rz])=([\w-]+)/.exec(location.hash);
   if (h) {
     try {
-      const r = JSON.parse(b64d(h[1]));
+      let bytes = fromB64(h[2]);
+      if (h[1] === "z") bytes = await squeeze(bytes, "unzip");
+      const r = unpackRoute(JSON.parse(new TextDecoder().decode(bytes)));
       if (!validRoute(r)) throw new Error();
       r.stops.forEach(s => { s.done = false; s.chain = s.chain ? 1 : null; });
       setRoute(r);
