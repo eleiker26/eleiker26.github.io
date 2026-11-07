@@ -103,6 +103,15 @@ li.done { opacity: 0.55; }
 .note.warn { color: var(--warn); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .addbox { margin-top: -8px; }
+.sugwrap { position: relative; }
+.suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); max-height: 340px; overflow: auto; }
+.suggest li { display: block; border-top: 0; padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.suggest li.on, .suggest li:hover { background: var(--bg); }
+.suggest li b { display: block; font-weight: 600; }
+.suggest li small { display: block; color: var(--muted); font-size: 0.85rem; }
+.suggest .src { padding: 6px 12px 4px; color: var(--muted); font-size: 0.72rem; cursor: default; }
+.suggest .src:hover { background: none; }
 .addpanel { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
 .addpanel .hint { margin: 0; }
 .addpanel label.top { margin-bottom: 0; }
@@ -194,7 +203,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 11 · Nov 7, 2026</p>
+  <p class="note">Version 12 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -227,10 +236,139 @@ function updateCount() {
 }
 box.addEventListener("input", updateCount);
 updateCount();
+attachSuggest($("start"), {
+  query: () => $("start").value,
+  onPick: it => { $("start").value = it.text; store.set("start", it.text); }
+});
+attachSuggest(box, {
+  query: () => currentLine(box).text.replace(/@.*$/, ""),
+  onPick: it => {
+    const ln = currentLine(box), keep = (ln.text.match(/\s*@.*$/) || [""])[0];
+    const line = it.text + keep;
+    box.value = box.value.slice(0, ln.a) + line + box.value.slice(ln.z);
+    const caret = ln.a + line.length;
+    box.setSelectionRange(caret, caret);
+    updateCount();
+  }
+});
 
 function setStatus(msg, isError) {
   statusEl.textContent = msg;
   statusEl.className = "status" + (isError ? " error" : "");
+}
+
+// ---------- Place suggestions as you type ----------
+// A place you tap is remembered with its exact location, so it never has to be looked up (or guessed) again.
+function picksBook() { try { return JSON.parse(store.get("picks") || "{}"); } catch (e) { return {}; } }
+const pickKey = t => (t || "").toLowerCase().replace(/@.*$/, "").replace(/\s+/g, " ").trim();
+function pickFor(text) { return picksBook()[pickKey(text)] || null; }
+function savePick(text, p) {
+  const b = picksBook();
+  b[pickKey(text)] = { lat: p.lat, lon: p.lon, label: p.label };
+  const keys = Object.keys(b);
+  if (keys.length > 300) delete b[keys[0]];
+  store.set("picks", JSON.stringify(b));
+}
+// Favor places near your next stop, or near where you last started.
+function biasPoint() {
+  if (typeof route !== "undefined" && route) return route.stops.find(x => !x.done) || route.start;
+  try { return JSON.parse(store.get("lastPos") || "null"); } catch (e) { return null; }
+}
+async function suggestPlaces(q, signal) {
+  const b = biasPoint();
+  let url = "https://photon.komoot.io/api/?limit=10&lang=en&q=" + encodeURIComponent(q);
+  if (b && isFinite(b.lat)) url += "&lat=" + (+b.lat).toFixed(4) + "&lon=" + (+b.lon).toFixed(4);
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error("http");
+  const out = [], seen = new Set();
+  for (const f of (await res.json()).features || []) {
+    const p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
+    if (!c) continue;
+    const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+    const city = p.city || p.town || p.village || p.locality || p.district || p.county || "";
+    const st = p.state ? (STATES[p.state.toLowerCase()] || p.state) : "";
+    const stZip = [st, p.postcode].filter(Boolean).join(" ");
+    const name = p.name && p.name !== street && p.name !== city ? p.name : "";
+    const where = [street, city, stZip].filter(Boolean).join(", ");
+    if (!where) continue;
+    const text = name ? name + ", " + where : where;
+    if (seen.has(text)) continue;
+    seen.add(text);
+    out.push({
+      title: name || street || city, sub: name ? where : [city, stZip].filter(Boolean).join(", "), text,
+      lat: c[1], lon: c[0], label: name ? name + " — " + [street, city, st].filter(Boolean).join(", ") : where
+    });
+    if (out.length === 6) break;
+  }
+  return out;
+}
+function attachSuggest(field, opts) {
+  const wrap = document.createElement("div");
+  wrap.className = "sugwrap";
+  field.parentNode.insertBefore(wrap, field);
+  wrap.append(field);
+  const list = document.createElement("ul");
+  list.className = "suggest"; list.id = field.id + "Sug"; list.hidden = true;
+  list.setAttribute("role", "listbox");
+  wrap.append(list);
+  field.setAttribute("aria-autocomplete", "list");
+  field.setAttribute("aria-controls", list.id);
+  field.setAttribute("aria-expanded", "false");
+  let items = [], active = -1, timer = null, ctl = null, seq = 0;
+  const close = () => { list.hidden = true; items = []; active = -1; field.setAttribute("aria-expanded", "false"); field.removeAttribute("aria-activedescendant"); };
+  const pick = i => { const it = items[i]; close(); if (it) { savePick(it.text, it); opts.onPick(it); } };
+  const show = () => {
+    list.replaceChildren();
+    items.forEach((it, i) => {
+      const li = document.createElement("li");
+      li.id = list.id + i; li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", i === active ? "true" : "false");
+      if (i === active) li.className = "on";
+      const b = document.createElement("b"); b.textContent = it.title;
+      const sm = document.createElement("small"); sm.textContent = it.sub;
+      li.append(b, sm);
+      li.addEventListener("pointerdown", e => { e.preventDefault(); pick(i); });
+      list.append(li);
+    });
+    if (items.length) {
+      const src = document.createElement("li");
+      src.className = "src"; src.setAttribute("role", "presentation");
+      src.textContent = "Places from OpenStreetMap";
+      list.append(src);
+    }
+    list.hidden = !items.length;
+    field.setAttribute("aria-expanded", items.length ? "true" : "false");
+    if (active >= 0) field.setAttribute("aria-activedescendant", list.id + active); else field.removeAttribute("aria-activedescendant");
+  };
+  field.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = (opts.query() || "").trim();
+    if (q.length < 3 || /^any\s/i.test(q)) { seq++; return close(); }
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      if (ctl) ctl.abort();
+      ctl = new AbortController();
+      try {
+        const res = await suggestPlaces(q, ctl.signal);
+        if (my !== seq) return;
+        items = res; active = -1; show();
+      } catch (e) {}
+    }, 280);
+  });
+  field.addEventListener("keydown", e => {
+    if (list.hidden || !items.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % items.length; show(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + items.length) % items.length; show(); }
+    else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(active); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+  });
+  field.addEventListener("blur", () => setTimeout(close, 150));
+}
+// The stops box: suggestions for the line you're typing; tapping one fills in that line.
+function currentLine(ta) {
+  const v = ta.value, caret = ta.selectionStart;
+  const a = v.lastIndexOf("\n", caret - 1) + 1, z = v.indexOf("\n", caret);
+  return { a, z: z < 0 ? v.length : z, text: v.slice(a, z < 0 ? v.length : z) };
 }
 
 // ---------- Reading each line: "any X" stops and "@ time" windows ----------
@@ -1032,7 +1170,7 @@ async function addToRoute(it) {
       it.candidates = await findBranches(it.chain, nextStop ? [here, nextStop] : [here], 16000, 8);
       if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near you or your next stop. Try a different name, or type a specific address.");
     } else {
-      const g = await geocode(it.text, here);
+      const g = it.pick || await geocode(it.text, here);
       if (!g) throw new Error("Couldn't find “" + it.text + "”. Check the spelling and add a city and state, then try again.");
       Object.assign(it, g);
     }
@@ -1106,10 +1244,16 @@ function addStop() {
   let it;
   try { it = parseLine(raw, route.stops.length); } catch (e) { return setStatus(e.message, true); }
   it.note = savedNote(raw);
+  const pk = pickFor(it.text);
+  if (pk) { it.pick = pk; it.chain = null; it.float = false; }
   addToRoute(it);
 }
 $("addBtn").addEventListener("click", addStop);
-$("addStop").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addStop(); } });
+attachSuggest($("addStop"), {
+  query: () => $("addStop").value,
+  onPick: it => { $("addStop").value = it.text; }
+});
+$("addStop").addEventListener("keydown", e => { if (e.key === "Enter" && !e.defaultPrevented) { e.preventDefault(); addStop(); } });
 
 // ---------- Share as a link (the whole route is in the link; nothing is uploaded) ----------
 // The route is packed into short arrays and compressed, so the link stays short enough for Messages.
@@ -1202,6 +1346,7 @@ $("form").addEventListener("submit", async e => {
   btn.disabled = true;
   try {
     const items = raw.map(parseLine);
+    items.forEach(it => { const pk = pickFor(it.text); if (pk) { it.pick = pk; it.chain = null; it.float = false; } });
     const stay = Math.max(0, Math.min(240, parseFloat($("stay").value) || 0));
     let dep = Date.now();
     if ($("leave").value) {
@@ -1213,13 +1358,15 @@ $("form").addEventListener("submit", async e => {
     const typedStart = $("start").value.trim();
     if (typedStart) {
       setStatus("Looking up your starting address…");
-      const g = await geocode(typedStart, null);
+      const g = pickFor(typedStart) || await geocode(typedStart, null);
       if (!g) throw new Error("Couldn't find your current address “" + typedStart + "”. Add a city and state, then try again.");
       start = { ...g, label: typedStart };
+      store.set("lastPos", JSON.stringify({ lat: g.lat, lon: g.lon }));
     } else {
       setStatus("Getting your location…");
       try {
         start = { ...(await getLocation()), label: "Your location" };
+        store.set("lastPos", JSON.stringify({ lat: start.lat, lon: start.lon }));
       } catch (err) {
         $("start").focus();
         throw new Error(err.code === 1
@@ -1232,7 +1379,7 @@ $("form").addEventListener("submit", async e => {
     for (let k = 0; k < fixed.length; k++) {
       const it = fixed[k];
       setStatus("Looking up address " + (k + 1) + " of " + fixed.length + "…");
-      const g = await geocode(it.text, start);
+      const g = it.pick || await geocode(it.text, start);
       if (!g) throw new Error("Couldn't find stop " + (items.indexOf(it) + 1) + ", “" + it.text + "”. Check the spelling and add a city and state, then try again.");
       Object.assign(it, g);
     }
