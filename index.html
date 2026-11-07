@@ -103,6 +103,39 @@ li.done { opacity: 0.55; }
 .note.warn { color: var(--warn); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .addbox { margin-top: -8px; }
+.cal { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.calnav { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 8px; }
+.calnav b { font: 700 1rem/1 var(--display); }
+button.calbtn { width: 36px; height: 36px; padding: 0; border-radius: 8px; background: transparent; color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); font-size: 1.2rem; }
+.calgrid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.calhead span { text-align: center; font: 700 0.68rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 4px 0 6px; }
+button.calday { position: relative; aspect-ratio: 1 / 0.72; min-height: 42px; padding: 6px 0 0; border-radius: 8px; background: transparent; color: var(--fg);
+  font: 500 0.9rem/1 var(--body); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+button.calday:hover { background: var(--bg); }
+button.calday.past { color: var(--muted); }
+button.calday.today { box-shadow: inset 0 0 0 2px var(--accent); }
+button.calday.sel { background: var(--accent); color: var(--accent-fg); }
+.calday .jobs { font: 700 0.66rem/1 var(--mono); padding: 2px 5px; border-radius: 99px; background: var(--bg); color: var(--accent); }
+.calday.sel .jobs { background: var(--accent-fg); color: var(--accent); }
+.calday.full .jobs { color: var(--warn); }
+.unsched { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin-top: 10px; }
+.unhead { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.unhead b { font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--warn); }
+.unhead span { font: 500 0.78rem/1 var(--mono); color: var(--muted); }
+.unsched ul { list-style: none; margin: 0; padding: 0; }
+.unsched li { display: block; padding: 10px 14px; border-top: 1px solid var(--line); }
+.unsched li:first-child { border-top: 0; }
+.unsched li small { display: block; color: var(--muted); font-size: 0.82rem; }
+.unsched .acts input[type=date] { width: auto; padding: 4px 8px; font-size: 0.85rem; }
+.jobpanel { margin-bottom: 10px; }
+.jobtitle { font: 700 1rem/1.2 var(--display); }
+.jobgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.jobgrid .full { grid-column: 1 / -1; }
+.jobgrid label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.jobgrid .opt { opacity: 0.8; }
+.jobgrid input { padding: 10px 12px; }
+input[type=tel], input[type=date] { width: 100%; font: 1rem/1.5 var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+@media (max-width: 420px) { .jobgrid { grid-template-columns: 1fr; } }
 .tablehead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .tablehead .top { font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
 .tablemeta { display: flex; gap: 14px; align-items: baseline; font: 500 0.78rem/1 var(--mono); color: var(--muted); }
@@ -170,9 +203,44 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
       <label class="top" for="start">Your current address <span>optional</span></label>
       <input id="start" type="text" autocomplete="street-address" placeholder="Leave blank to use your location">
     </div>
+    <section class="field sched" aria-labelledby="schedTitle">
+      <div class="tablehead">
+        <span class="top" id="schedTitle">Schedule</span>
+        <button id="jobOpen" type="button" class="mini">+ New job</button>
+      </div>
+      <div id="jobPanel" class="addpanel jobpanel" hidden>
+        <b class="jobtitle">New job</b>
+        <div class="jobgrid">
+          <div class="full"><label for="jobPlace">Address or place</label><input id="jobPlace" type="text" autocomplete="off" placeholder="Start typing, then pick a suggestion"></div>
+          <div><label for="jobName">Customer name</label><input id="jobName" type="text" autocomplete="off"></div>
+          <div><label for="jobPhone">Phone</label><input id="jobPhone" type="tel" autocomplete="off" inputmode="tel"></div>
+          <div class="full"><label for="jobNotes">Job details</label><input id="jobNotes" type="text" autocomplete="off" placeholder="Referral from…, roof inspection, gate code…"></div>
+          <div><label for="jobDate">Date</label><input id="jobDate" type="date"></div>
+          <div><label for="jobTime">Arrive <span class="opt">optional</span></label><input id="jobTime" type="text" autocomplete="off" placeholder="e.g. 2-4pm"></div>
+        </div>
+        <p class="hint">No date yet? Leave Date blank and it goes on your “Not scheduled yet” list, so the job isn't lost.</p>
+        <div class="row">
+          <button id="jobSave" type="button">Save job</button>
+          <button id="jobCancel" type="button" class="secondary">Cancel</button>
+        </div>
+      </div>
+      <div class="cal">
+        <div class="calnav">
+          <button id="calPrev" type="button" class="calbtn" aria-label="Previous month">‹</button>
+          <b id="calMonth" aria-live="polite"></b>
+          <button id="calNext" type="button" class="calbtn" aria-label="Next month">›</button>
+        </div>
+        <div class="calgrid calhead" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+        <div class="calgrid" id="calGrid"></div>
+      </div>
+      <div id="unsched" class="unsched" hidden>
+        <div class="unhead"><b>Not scheduled yet</b><span id="unCount"></span></div>
+        <ul id="unList"></ul>
+      </div>
+    </section>
     <div class="field">
       <div class="tablehead">
-        <span class="top" id="stopsLabel">Stops</span>
+        <span class="top" id="stopsLabel">Stops for today</span>
         <span class="tablemeta"><span id="count">0 / 12</span><button id="clearStops" type="button" class="mini">Clear all</button></span>
       </div>
       <div class="stoptable" role="table" aria-labelledby="stopsLabel">
@@ -240,7 +308,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 13 · Nov 7, 2026</p>
+  <p class="note">Version 14 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -254,7 +322,20 @@ const store = {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------- Saved inputs ----------
-box.value = store.get("stops") || "";
+// ---------- Schedule: each day keeps its own list of stops ----------
+const pad2 = n => String(n).padStart(2, "0");
+const dkey = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+const keyDate = k => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const todayKey = () => dkey(new Date());
+const dayName = k => k === todayKey() ? "today" : keyDate(k).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+function daysBook() { try { return JSON.parse(store.get("days") || "{}"); } catch (e) { return {}; } }
+function saveDays(b) { store.set("days", JSON.stringify(b)); }
+function dayText(k) { return daysBook()[k] || ""; }
+function dayCount(k) { return dayText(k).split("\n").filter(x => x.trim()).length; }
+let selDay = todayKey(), calReady = false;
+// First time with the calendar: today's stops are whatever was in the list before.
+if (!store.get("days") && store.get("stops")) { const b = {}; b[selDay] = store.get("stops"); saveDays(b); }
+box.value = dayText(selDay);
 // Build the 12 rows from the saved list.
 const rowsEl = $("stopRows"), rows = [];
 for (let i = 0; i < MAX; i++) {
@@ -326,7 +407,10 @@ function updateCount() {
   const n = lines().length;
   $("count").textContent = n + " / " + MAX;
   $("count").className = n > MAX ? "over" : "";
-  store.set("stops", box.value);
+  const b = daysBook();
+  if (box.value.trim()) b[selDay] = box.value; else delete b[selDay];
+  saveDays(b);
+  if (typeof renderCal === "function" && calReady) renderCal();
 }
 box.addEventListener("input", updateCount);
 updateCount();
@@ -338,6 +422,131 @@ rows.forEach(r => attachSuggest(r.stop, {
   query: () => r.stop.value,
   onPick: it => { r.stop.value = it.text; syncFromRows(); r.time.focus(); }
 }));
+
+let calMonth = new Date(); calMonth.setDate(1);
+function renderCal() {
+  const grid = $("calGrid"), y = calMonth.getFullYear(), m = calMonth.getMonth(), today = todayKey();
+  $("calMonth").textContent = calMonth.toLocaleDateString([], { month: "long", year: "numeric" });
+  grid.replaceChildren();
+  const first = new Date(y, m, 1).getDay(), last = new Date(y, m + 1, 0).getDate();
+  for (let i = 0; i < first; i++) grid.append(document.createElement("span"));
+  const book = daysBook();
+  for (let d = 1; d <= last; d++) {
+    const k = dkey(new Date(y, m, d)), n = (book[k] || "").split("\n").filter(x => x.trim()).length;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "calday" + (k === today ? " today" : "") + (k === selDay ? " sel" : "") + (k < today ? " past" : "") + (n >= MAX ? " full" : "");
+    b.dataset.day = k;
+    b.setAttribute("aria-label", keyDate(k).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }) + (n ? ", " + n + (n === 1 ? " job" : " jobs") : ""));
+    if (k === selDay) b.setAttribute("aria-current", "date");
+    const num = document.createElement("span"); num.textContent = d;
+    b.append(num);
+    if (n) { const j = document.createElement("span"); j.className = "jobs"; j.textContent = n; b.append(j); }
+    grid.append(b);
+  }
+  renderUnsched();
+}
+$("calGrid").addEventListener("click", e => { const b = e.target.closest("button[data-day]"); if (b) selectDay(b.dataset.day); });
+$("calPrev").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() - 1); renderCal(); });
+$("calNext").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() + 1); renderCal(); });
+
+// Switching days loads that day's stops into the table. A route you're driving stays with its own day.
+function selectDay(k) {
+  selDay = k;
+  box.value = dayText(k);
+  rowsFromText(box.value);
+  updateCount();
+  const d = keyDate(k);
+  if (d.getMonth() !== calMonth.getMonth() || d.getFullYear() !== calMonth.getFullYear()) { calMonth = new Date(d.getFullYear(), d.getMonth(), 1); }
+  renderCal();
+  showDay();
+}
+function showDay() {
+  $("stopsLabel").textContent = "Stops for " + dayName(selDay);
+  const routeHere = !!(route && (route.day || todayKey()) === selDay);
+  $("result").hidden = !route || !routeHere;
+  if (routeHere) setTimeout(() => { if (map) map.invalidateSize(); drawMap(); }, 0);
+  updateAddUI();
+  if (route && !routeHere) setStatus("Planning " + dayName(selDay) + ". Your route for " + dayName(route.day || todayKey()) + " is saved; tap that day to see it.");
+  else if (statusEl.textContent.startsWith("Planning ")) setStatus("");
+}
+
+// ---------- New job (for the referral you get while you're on a job) ----------
+function openJob() {
+  $("jobPanel").hidden = false; $("jobOpen").hidden = true;
+  $("jobDate").value = selDay >= todayKey() ? selDay : "";
+  $("jobPlace").focus();
+}
+function closeJob() {
+  $("jobPanel").hidden = true; $("jobOpen").hidden = false;
+  for (const id of ["jobPlace", "jobName", "jobPhone", "jobNotes", "jobTime"]) $(id).value = "";
+}
+$("jobOpen").addEventListener("click", openJob);
+$("jobCancel").addEventListener("click", closeJob);
+attachSuggest($("jobPlace"), { query: () => $("jobPlace").value, onPick: it => { $("jobPlace").value = it.text; $("jobName").focus(); } });
+function unBook() { try { return JSON.parse(store.get("unscheduled") || "[]"); } catch (e) { return []; } }
+function saveUn(list) { store.set("unscheduled", JSON.stringify(list)); }
+// Put a job on a day. Returns an error message, or "" when it worked.
+function scheduleJob(job, k) {
+  const b = daysBook(), ls = (b[k] || "").split("\n").filter(x => x.trim());
+  if (ls.length >= MAX) return dayName(k) + " already has " + MAX + " stops, the most one route can hold. Pick another day.";
+  ls.push(job.place + (job.time ? " @ " + job.time : ""));
+  b[k] = ls.join("\n");
+  saveDays(b);
+  if (k === selDay) { box.value = b[k]; rowsFromText(box.value); updateCount(); }
+  return "";
+}
+$("jobSave").addEventListener("click", () => {
+  const place = $("jobPlace").value.trim().replace(/@/g, " ");
+  if (!place) { $("jobPlace").focus(); return setStatus("Add the job's address or place first.", true); }
+  const time = $("jobTime").value.trim();
+  if (time && !parseWindow(time)) { $("jobTime").focus(); return setStatus("Couldn't read that time. Try “by 5pm”, “after 1pm” or “2-4pm”.", true); }
+  const note = [$("jobName").value.trim(), $("jobPhone").value.trim(), $("jobNotes").value.trim()].filter(Boolean).join(" · ");
+  if (note) rememberNote(place, note);
+  const job = { place, time, note, added: Date.now() };
+  const k = $("jobDate").value;
+  if (k) {
+    const err = scheduleJob(job, k);
+    if (err) return setStatus(err, true);
+    closeJob(); renderCal();
+    setStatus("Saved to " + dayName(k) + ". That day now has " + dayCount(k) + (dayCount(k) === 1 ? " job." : " jobs."));
+  } else {
+    const list = unBook(); list.push(job); saveUn(list);
+    closeJob(); renderCal();
+    setStatus("Saved to “Not scheduled yet.” Pick a date for it whenever you're ready.");
+  }
+});
+function renderUnsched() {
+  const list = unBook(), ul = $("unList");
+  $("unsched").hidden = !list.length;
+  $("unCount").textContent = list.length ? list.length + (list.length === 1 ? " job" : " jobs") : "";
+  ul.replaceChildren();
+  list.forEach((job, i) => {
+    const li = document.createElement("li");
+    const t = document.createElement("span"); t.textContent = job.place; li.append(t);
+    if (job.note) { const n = document.createElement("small"); n.textContent = job.note; li.append(n); }
+    const added = document.createElement("small"); added.textContent = "Added " + new Date(job.added).toLocaleDateString([], { month: "short", day: "numeric" }) + (job.time ? " · arrive " + job.time : ""); li.append(added);
+    const acts = document.createElement("div"); acts.className = "acts";
+    const lab = document.createElement("label"); lab.className = "sr"; lab.htmlFor = "un" + i; lab.textContent = "Schedule " + job.place + " on";
+    const date = document.createElement("input"); date.type = "date"; date.id = "un" + i; date.min = todayKey();
+    date.addEventListener("change", () => {
+      if (!date.value) return;
+      const err = scheduleJob(job, date.value);
+      if (err) { date.value = ""; return setStatus(err, true); }
+      const l2 = unBook(); l2.splice(i, 1); saveUn(l2); renderCal();
+      setStatus("Scheduled “" + job.place + "” for " + dayName(date.value) + ".");
+    });
+    const sched = document.createElement("span"); sched.className = "hint"; sched.textContent = "Schedule for:";
+    const del = document.createElement("button"); del.type = "button"; del.className = "mini"; del.textContent = "Remove";
+    del.addEventListener("click", () => {
+      if (!window.confirm("Remove “" + job.place + "” from your list? This can't be undone.")) return;
+      const l2 = unBook(); l2.splice(i, 1); saveUn(l2); renderCal();
+    });
+    acts.append(sched, lab, date, del);
+    li.append(acts);
+    ul.append(li);
+  });
+}
 
 function setStatus(msg, isError) {
   statusEl.textContent = msg;
@@ -910,6 +1119,7 @@ function schedule(r, live) {
 let route = null;
 function saveRoute() { store.set("route", JSON.stringify(route)); }
 function setRoute(r, save) {
+  if (!r.day) r.day = selDay;
   if (!r.plan || r.plan.length !== r.stops.length) r.plan = schedule({ ...r, plan: null }).map(x => x.arrive);
   route = r; if (save !== false) saveRoute(); render();
 }
@@ -1035,7 +1245,7 @@ function renderRest() {
   const lateN = sch.filter(x => x.late).length;
   $("warnNote").hidden = !lateN;
   $("warnNote").textContent = lateN ? "No order gets to every stop on time. " + lateN + (lateN === 1 ? " stop is" : " stops are") + " marked late; this order keeps the lateness as small as possible." : "";
-  $("result").hidden = false;
+  $("result").hidden = !!(route.day && route.day !== selDay);
   shareUrl = "";
   $("shareBox").hidden = true;
   prepareShare();
@@ -1197,6 +1407,7 @@ async function replanRoute(extra) {
     if (extra) items.push({ ...extra, lead: -2 });
     const next = await optimize(start, items, Date.now(), route.stay || 0);
     next.doneBefore = (route.doneBefore || 0) + doneNow;
+    next.day = route.day || todayKey();
     await fillStoreAddresses(next);
     editingNote = -1;
     setRoute(next);
@@ -1217,8 +1428,9 @@ async function replanRoute(extra) {
 
 // ---------- Add a stop at any time of day ----------
 function updateAddUI() {
-  $("addBtn").textContent = route ? "Add stop to today's route" : "Add to my stops";
-  $("addHint").textContent = route
+  const live = route && (route.day || todayKey()) === selDay;
+  $("addBtn").textContent = live ? (selDay === todayKey() ? "Add stop to today's route" : "Add stop to this route") : (selDay === todayKey() ? "Add to today's stops" : "Add to this day's stops");
+  $("addHint").textContent = live
     ? "Gas or food goes in as your next stop, at the location with the least detour. A new address goes wherever it adds the fewest miles. The rest of your route stays in the same order."
     : "It joins your stops above.";
 }
@@ -1294,6 +1506,10 @@ async function addToRoute(it) {
     editingNote = -1;
     setRoute(r);
     closeAdd();
+    if (r.day === selDay && !lines().some(l => pickKey(l) === pickKey(it.input))) {
+      const empty = rows.find(x => !x.stop.value.trim());
+      if (empty) { empty.stop.value = it.text || it.input; empty.time.value = ""; syncFromRows(); }
+    }
     const extraMi = Math.max(0, best.extra);
     setStatus("Added “" + it.input + "” as stop " + (k + 1) + (k === base ? ", your next stop" : "") + ". It adds about " + miles(extraMi) + " to your day.");
   } catch (err) {
@@ -1319,8 +1535,8 @@ async function resolveExtra(it, rem) {
 function addStop() {
   const raw = $("addStop").value.trim();
   if (!raw) return setStatus("Type an address or a store name to add.", true);
-  // No route yet: it simply joins the list above.
-  if (!route) {
+  // No route under way for the day you're looking at: it simply joins that day's list.
+  if (!route || (route.day || todayKey()) !== selDay) {
     if (lines().length >= MAX) return setStatus("You already have " + MAX + " stops, the most one route can hold.", true);
     const empty = rows.find(r => !r.stop.value.trim());
     const at = raw.lastIndexOf("@");
@@ -1438,10 +1654,13 @@ $("form").addEventListener("submit", async e => {
     const items = raw.map(parseLine);
     items.forEach(it => { const pk = pickFor(it.text); if (pk) { it.pick = pk; it.chain = null; it.float = false; } });
     const stay = Math.max(0, Math.min(240, parseFloat($("stay").value) || 0));
+    // Times are for the day you're planning: your leave time, or 8:00 AM on a future day.
     let dep = Date.now();
     if ($("leave").value) {
       const [h, m] = $("leave").value.split(":").map(Number);
-      const d = new Date(); d.setHours(h, m, 0, 0); dep = d.getTime();
+      const d = keyDate(selDay); d.setHours(h, m, 0, 0); dep = d.getTime();
+    } else if (selDay !== todayKey()) {
+      const d = keyDate(selDay); d.setHours(8, 0, 0, 0); dep = d.getTime();
     }
 
     let start;
@@ -1493,6 +1712,7 @@ $("form").addEventListener("submit", async e => {
     if (missing) throw new Error("Couldn't find “" + missing.chain + "” near " + (missing.float ? "your route" : "the stop above it") + ". Try a different name, or type a specific address.");
 
     const r = await optimize(start, items, dep, stay);
+    r.day = selDay;
     await fillStoreAddresses(r);
     editingNote = -1;
     setRoute(r);
@@ -1524,9 +1744,12 @@ $("form").addEventListener("submit", async e => {
   }
   try {
     const saved = JSON.parse(store.get("route") || "null");
-    if (validRoute(saved)) setRoute(saved, false);
+    if (validRoute(saved)) {
+      if (!saved.day) saved.day = dkey(new Date(saved.dep));
+      setRoute(saved, false);
+    }
   } catch (e) {}
-})();
+})().finally(() => { calReady = true; renderCal(); showDay(); });
 </script>
 </body>
 </html>
