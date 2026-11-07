@@ -188,7 +188,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 9 · Nov 7, 2026</p>
+  <p class="note">Version 10 · Nov 7, 2026</p>
 </main>
 
 <script>
@@ -331,11 +331,16 @@ function censusLookup(q) {
   });
 }
 // OpenStreetMap's Nominatim allows one request per second, so only those calls wait.
-let lastNom = 0;
-async function nomGate() {
-  const wait = lastNom + 1100 - Date.now();
-  if (wait > 0) await sleep(wait);
-  lastNom = Date.now();
+// Calls line up one at a time, even when several searches run together.
+let lastNom = 0, nomQueue = Promise.resolve();
+function nomGate() {
+  const turn = nomQueue.then(async () => {
+    const wait = lastNom + 1100 - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastNom = Date.now();
+  });
+  nomQueue = turn.catch(() => {});
+  return turn;
 }
 // "2187 Neil Ave, Columbus, OH" instead of the full county-and-country version.
 const STATES = { alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",delaware:"DE",
@@ -1140,22 +1145,22 @@ $("form").addEventListener("submit", async e => {
     }
     const anchors = [start, ...fixed];
     items.forEach((it, i) => { it.lead = it.chain && !it.float ? i - 1 : -2; });
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (!it.chain) continue;
+    // All store searches run at the same time.
+    const storeItems = items.filter(it => it.chain);
+    if (storeItems.length) setStatus(storeItems.length === 1 ? "Finding “" + storeItems[0].chain + "”…" : "Finding " + storeItems.length + " stores and places along your route…");
+    await Promise.all(storeItems.map(async it => {
+      const i = items.indexOf(it);
       let near = anchors, radius = 16000, limit = PER_CHAIN;
       if (!it.float) {
         // Stays right after the line above: search around the closest address above it.
         let prev = start;
         for (let k = i - 1; k >= 0; k--) if (!items[k].chain) { prev = items[k]; break; }
         near = [prev]; radius = 25000; limit = 8;
-        setStatus("Finding “" + it.chain + "” near " + (prev === start ? "your start" : "stop " + (items.indexOf(prev) + 1)) + "…");
-      } else {
-        setStatus("Finding nearby “" + it.chain + "” locations…");
       }
       it.candidates = await findBranches(it.chain, near, radius, limit);
-      if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near " + (it.float ? "your route" : "the stop above it") + ". Try a different name, or type a specific address.");
-    }
+    }));
+    const missing = storeItems.find(it => !it.candidates.length);
+    if (missing) throw new Error("Couldn't find “" + missing.chain + "” near " + (missing.float ? "your route" : "the stop above it") + ". Try a different name, or type a specific address.");
 
     const r = await optimize(start, items, dep, stay);
     await fillStoreAddresses(r);
