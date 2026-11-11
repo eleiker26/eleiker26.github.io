@@ -1,0 +1,2834 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shortest Stop Route</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b7a5a">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Stop Route">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+/* Layout: one narrow column — inputs, one button, then map, ordered stop list and actions. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --fg: #16201c;
+  --muted: #5d6b65;
+  --line: #d6ddd9;
+  --accent: #0b7a5a;
+  --accent-fg: #ffffff;
+  --warn: #a34a12;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #101614; --surface: #18201d; --fg: #e6ece9; --muted: #95a39d;
+    --line: #2b3632; --accent: #3fc495; --accent-fg: #06140f; --warn: #f0a46c;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 16px/1.5 var(--body);
+  padding-block: 32px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+h1 { font: 800 1.9rem/1.1 var(--display); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.sub { margin: 6px 0 0; color: var(--muted); }
+.field { margin-bottom: 18px; }
+label.top { display: flex; justify-content: space-between; font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 8px; }
+label.top span { font-family: var(--mono); letter-spacing: 0; }
+label.top span.over { color: var(--warn); }
+input[type=text], input[type=number], input[type=time], textarea {
+  width: 100%; font: 1rem/1.5 var(--body); color: var(--fg);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+}
+textarea { min-height: 230px; resize: vertical; line-height: 1.7; }
+input:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.hint { margin: 8px 0 0; color: var(--muted); font-size: 0.85rem; }
+.hint code { font-family: var(--mono); font-size: 0.8rem; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; white-space: nowrap; }
+details { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+summary { cursor: pointer; padding: 12px 14px; font: 700 0.78rem/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 0 14px 14px; }
+.opts label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.opts input { padding: 9px 11px; }
+.opts .full { grid-column: 1 / -1; }
+.opts select { width: 100%; padding: 9px 11px; font: inherit; color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.opts select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button, .btn {
+  display: block; width: 100%; text-align: center; text-decoration: none;
+  font: 700 1.05rem/1.2 var(--display); letter-spacing: 0.01em;
+  padding: 16px; border-radius: 10px; border: 0; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg);
+}
+.btn.secondary, button.secondary { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 2px var(--accent); padding: 13px; font-size: 0.95rem; }
+button:disabled { opacity: 0.55; cursor: progress; }
+.row { display: flex; gap: 10px; }
+.row > * { flex: 1; }
+.links { display: flex; flex-direction: column; gap: 10px; }
+.status { margin: 0; color: var(--muted); min-height: 1.5em; }
+.status.error { color: var(--warn); }
+#result { display: flex; flex-direction: column; gap: 14px; }
+.totals { display: flex; gap: 22px; flex-wrap: wrap; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.totals b { display: block; font: 800 1.5rem/1.1 var(--display); }
+.totals small { color: var(--muted); font-size: 0.8rem; }
+/* Turn-by-turn directions */
+#dirWrap summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 14px; border: 2px solid var(--accent); border-radius: 10px; color: var(--accent); font: 700 1rem/1.2 var(--display); }
+#dirWrap summary::-webkit-details-marker { display: none; }
+#dirWrap summary::after { content: "Show"; font: 500 0.8rem/1 var(--mono); }
+#dirWrap[open] summary::after { content: "Hide"; }
+#dirWrap[open] summary { border-radius: 10px 10px 0 0; }
+#dirWrap summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#steps { border-top: 0; border-radius: 0 0 10px 10px; }
+#steps li { grid-template-columns: 1.6rem 1fr auto; padding: 10px 14px; cursor: pointer; }
+#steps li:hover, #steps li:focus-visible { background: color-mix(in srgb, var(--accent) 9%, transparent); outline: none; }
+#steps li.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#steps li.legHead { cursor: default; background: var(--bg); font: 700 0.86rem/1.3 var(--display); }
+#steps li.legHead.done { opacity: 0.55; }
+#steps .arrow { color: var(--accent); text-align: center; font-size: 1.05rem; line-height: 1; }
+#steps .leg { font: 500 0.82rem/1 var(--mono); color: var(--muted); white-space: nowrap; }
+.turnDot { width: 14px; height: 14px; border-radius: 50%; background: #f59e0b; border: 3px solid #fff; box-shadow: 0 0 0 2px #f59e0b; }
+/* Mileage log */
+#logBox { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+#logBox > summary { cursor: pointer; padding: 14px; font: 700 0.95rem/1.2 var(--display); list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+#logBox > summary::-webkit-details-marker { display: none; }
+#logBox > summary::after { content: "Show"; font: 500 0.8rem/1 var(--mono); color: var(--accent); }
+#logBox[open] > summary::after { content: "Hide"; }
+#logBox > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.logIn { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+.logCards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.logCard { background: var(--bg); border-radius: 8px; padding: 10px; min-width: 0; }
+.logCard b { display: block; font: 800 1.25rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.logCard small { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+.logCard .k { font: 700 0.7rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px; display: block; }
+.tableWrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.logTable { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+.logTable th, .logTable td { padding: 8px 10px; text-align: right; white-space: nowrap; border-top: 1px solid var(--line); }
+.logTable th { border-top: 0; font: 700 0.72rem/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: var(--bg); }
+.logTable th:first-child, .logTable td:first-child { text-align: left; }
+.logTable tr.today td { font-weight: 700; }
+.logTable tfoot td { font-weight: 700; background: var(--bg); }
+.logTable .rateCol { display: none; }
+.logTable.withRate .rateCol { display: table-cell; }
+.logOpts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.logOpts label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.logOpts input, .logOpts select { width: 100%; padding: 9px 11px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+@media (max-width: 420px) { .logOpts { grid-template-columns: 1fr; } .logCard b { font-size: 1.05rem; } }
+.nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.nudge[hidden] { display: none !important; }
+.nudgeBtns { display: flex; gap: 8px; }
+/* New-version notice */
+#updateBar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6000; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--fg); color: var(--bg); font-weight: 500;
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  box-shadow: 0 -2px 12px rgba(0,0,0,.25); }
+#updateBar button { width: auto; padding: 10px 18px; background: var(--accent); color: var(--accent-fg); font-size: 0.95rem; flex: none; }
+/* Live GPS driving mode */
+:root { --nav-bg: #0d3b2c; --nav-fg: #ffffff; --nav-sub: #b9e5d3; --nav-bar: #ffffff; --nav-bar-fg: #16201c; }
+@media (prefers-color-scheme: dark) { :root { --nav-bg: #0b2a20; --nav-bar: #18201d; --nav-bar-fg: #e6ece9; } }
+body.navOpen { overflow: hidden; }
+#startDrive { font-size: 1.15rem; padding: 18px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+#nav { position: fixed; inset: 0; z-index: 5000; display: flex; flex-direction: column; background: var(--bg); }
+.navTop { background: var(--nav-bg); color: var(--nav-fg);
+  padding: calc(12px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 14px max(16px, env(safe-area-inset-left, 0px));
+  display: grid; grid-template-columns: 64px 1fr; gap: 4px 14px; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,.25); }
+#navArrow { grid-row: span 2; font-size: 3rem; line-height: 1; text-align: center; }
+#navDist { font: 800 2rem/1 var(--display); font-variant-numeric: tabular-nums; }
+#navText { grid-column: 2; font: 700 1.2rem/1.25 var(--display); text-wrap: balance; }
+#navSub { grid-column: 1 / -1; color: var(--nav-sub); font-size: 0.95rem; }
+#navSub:empty { display: none; }
+#navStatus { grid-column: 1 / -1; margin: 4px 0 0; padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.14); font-size: 0.9rem; }
+#navMap { flex: 1; min-height: 0; z-index: 0; }
+.navMe { width: 40px; height: 40px; transition: transform .3s; filter: drop-shadow(0 1px 3px rgba(0,0,0,.4)); }
+.pin.navTarget { width: 34px; height: 34px; font-size: 15px; box-shadow: 0 0 0 4px rgba(29,111,224,.35); }
+#navRecenter { position: absolute; left: max(16px, env(safe-area-inset-left, 0px)); bottom: 12px; z-index: 1000; width: auto; padding: 10px 16px; font-size: 0.95rem; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.navMapWrap { position: relative; flex: 1; min-height: 0; display: flex; }
+.navBottom { background: var(--nav-bar); color: var(--nav-bar-fg); border-top: 1px solid var(--line);
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  display: flex; flex-direction: column; gap: 10px; }
+.navInfo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+#navNext { font: 700 1rem/1.3 var(--display); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#navEta { font: 500 0.9rem/1 var(--mono); color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.navBtns { display: flex; gap: 10px; }
+.navBtns button { flex: 1; width: auto; padding: 14px 10px; font-size: 1rem; }
+#navArrive { display: flex; gap: 10px; }
+#navArrive button { flex: 1; width: auto; padding: 16px 10px; }
+#navArrive[hidden] { display: none !important; }
+#map { height: 340px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; z-index: 0; }
+.pin {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-fg); border: 2px solid #fff;
+  font: 700 12px/1 var(--mono); box-shadow: 0 1px 4px rgba(0,0,0,.35);
+}
+.pin.start { background: var(--fg); color: var(--bg); }
+.pin.late { background: var(--warn); color: #fff; }
+.pin.done { background: #8a948f; color: #fff; }
+.pin.group { width: auto; height: 28px; padding: 0 8px; border-radius: 99px; background: var(--fg); color: var(--bg); font-size: 12px; white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(0,0,0,.35), 3px 3px 0 -1px var(--accent), 3px 3px 0 1px #fff; cursor: pointer; }
+.grouplist { display: flex; flex-direction: column; margin-top: 8px; max-height: 240px; overflow: auto; }
+button.grouprow { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 4px; background: none; border: 0; border-top: 1px solid var(--line);
+  border-radius: 0; color: var(--fg); font: 500 0.88rem/1.3 var(--body); text-align: left; cursor: pointer; }
+button.grouprow:first-child { border-top: 0; }
+button.grouprow:hover { background: var(--bg); }
+.grouprow .pin { flex: none; width: 24px; height: 24px; font-size: 11px; border-width: 1.5px; }
+.grouprow .pin.quick { border-radius: 50%; }
+.grouprow .gtext { min-width: 0; }
+.grouprow .gtext small { display: block; color: var(--muted); font: 500 0.75rem/1.2 var(--mono); }
+.leaflet-container .leaflet-popup-content-wrapper, .leaflet-container .leaflet-popup-tip { background: var(--surface); color: var(--fg); box-shadow: 0 8px 24px rgba(0,0,0,.3); }
+.leaflet-container .leaflet-popup-content { margin: 12px 14px; font: 0.9rem/1.4 var(--body); }
+.leaflet-container a.leaflet-popup-close-button { color: var(--muted); }
+.pincard b { display: block; font: 700 0.98rem/1.3 var(--display); padding-right: 14px; }
+.pincard small { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 2px; }
+.pincard .eta { display: block; font: 500 0.82rem/1.3 var(--mono); margin-top: 6px; }
+.pincard .eta.late { color: var(--warn); }
+.pincard .pnote { margin: 8px 0 0; padding: 6px 8px; background: var(--bg); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; white-space: pre-wrap; }
+.pincard .pnote.empty { color: var(--muted); border-left-color: var(--line); font-size: 0.82rem; }
+.pincard .acts { margin-top: 8px; }
+.leaflet-container .pincard a.mini { color: var(--accent); }
+button.pinbtn { display: inline; width: auto; padding: 4px 2px; background: none; border: 0; border-radius: 4px; color: var(--accent); font: 700 0.95rem/1 var(--mono); text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.pin.endpin { background: var(--fg); color: var(--bg); font-size: 15px; }
+.pin.quick { background: #d97706; color: #fff; border-radius: 50% 50% 50% 0; }
+ol { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+li { display: grid; grid-template-columns: 1.4rem 1.6rem 1fr auto; gap: 8px; align-items: baseline; padding: 12px 14px; border-top: 1px solid var(--line); }
+li:first-child { border-top: 0; }
+li input[type=checkbox] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); align-self: center; cursor: pointer; }
+li.done .addr > span:first-child { text-decoration: line-through; }
+li.done { opacity: 0.55; }
+.n { font: 700 0.95rem/1 var(--mono); color: var(--accent); }
+.addr { min-width: 0; overflow-wrap: anywhere; }
+.addr small { display: block; color: var(--muted); font-size: 0.8rem; }
+.addr small.eta { font-family: var(--mono); color: var(--fg); }
+.addr small.eta.late { color: var(--warn); }
+.leg { font: 500 0.85rem/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.note { color: var(--muted); font-size: 0.85rem; margin: 0; }
+.note.warn { color: var(--warn); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.addbox { margin-top: -8px; }
+.cal { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.calnav { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 8px; }
+.calnav b { font: 700 1rem/1 var(--display); }
+button.calbtn { width: 36px; height: 36px; padding: 0; border-radius: 8px; background: transparent; color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); font-size: 1.2rem; }
+.calgrid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.calhead span { text-align: center; font: 700 0.68rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 4px 0 6px; }
+button.calday { position: relative; width: 100%; min-width: 0; height: 46px; padding: 6px 0 0; border-radius: 8px; background: transparent; color: var(--fg);
+  font: 500 0.9rem/1 var(--body); display: flex; flex-direction: column; align-items: center; gap: 4px; }
+button.calday:hover { background: var(--bg); }
+button.calday.past { color: var(--muted); }
+button.calday.today { box-shadow: inset 0 0 0 2px var(--accent); }
+button.calday.sel { background: var(--accent); color: var(--accent-fg); }
+.calday .jobs { font: 700 0.66rem/1 var(--mono); padding: 2px 5px; border-radius: 99px; background: var(--bg); color: var(--accent); }
+.calday.sel .jobs { background: var(--accent-fg); color: var(--accent); }
+.calday.full .jobs { color: var(--warn); }
+.unsched { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; margin-top: 10px; }
+.unhead { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.unhead b { font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--warn); }
+.unhead span { font: 500 0.78rem/1 var(--mono); color: var(--muted); }
+.unsched ul { list-style: none; margin: 0; padding: 0; }
+.unsched li { display: block; padding: 10px 14px; border-top: 1px solid var(--line); }
+.unsched li:first-child { border-top: 0; }
+.unsched li small { display: block; color: var(--muted); font-size: 0.82rem; }
+.unsched .acts input[type=date] { width: auto; padding: 4px 8px; font-size: 0.85rem; }
+.jobpanel { margin-bottom: 10px; }
+.backup { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 12px; margin-top: 10px; }
+.backup .hint { margin: 0; }
+.backup .hint.stale { color: var(--warn); }
+.backup .acts { margin-top: 0; }
+.jobtitle { font: 700 1rem/1.2 var(--display); }
+.jobgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.jobgrid .full { grid-column: 1 / -1; }
+.jobgrid label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.jobgrid .opt { opacity: 0.8; }
+.jobgrid input { padding: 10px 12px; }
+input[type=tel], input[type=date] { width: 100%; font: 1rem/1.5 var(--body); color: var(--fg); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+@media (max-width: 420px) { .jobgrid { grid-template-columns: 1fr; } }
+.tablehead { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.tablehead .top { font: 700 0.78rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.tablemeta { display: flex; gap: 14px; align-items: baseline; font: 500 0.78rem/1 var(--mono); color: var(--muted); }
+.tablemeta .over { color: var(--warn); }
+.stoptable { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.srow { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr) 7.5rem; align-items: center; border-top: 1px solid var(--line); position: relative; }
+.srow:first-child { border-top: 0; }
+#stopRows .srow:first-child { border-top: 1px solid var(--line); }
+#stopRows .srow:last-child { border-radius: 0 0 10px 10px; }
+.shead { font: 700 0.7rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.shead span { padding: 11px 12px; }
+.shead span:first-child { text-align: center; padding-inline: 0; }
+.shead i { font-style: normal; font-weight: 500; text-transform: none; letter-spacing: 0; opacity: 0.8; }
+.srow .num { text-align: center; font: 700 0.85rem/1 var(--mono); color: var(--muted); }
+.srow.filled .num { color: var(--accent); }
+.srow .sugwrap { min-width: 0; }
+.stoptable input[type=text] { border: 0; border-radius: 0; background: transparent; padding: 12px; width: 100%; font-size: 0.98rem; }
+.stoptable input.timeIn { border-left: 1px solid var(--line); font-size: 0.9rem; }
+.stoptable input:focus-visible { outline: none; }
+.srow:not(.shead):focus-within { background: var(--bg); box-shadow: inset 3px 0 0 var(--accent); }
+.stoptable .suggest { left: -2.4rem; right: -7.5rem; }
+@media (max-width: 420px) {
+  .srow { grid-template-columns: 2rem minmax(0, 1fr) 5.6rem; }
+  .stoptable .suggest { left: -2rem; right: -5.6rem; }
+  .stoptable input.timeIn { padding-inline: 8px; }
+}
+.sugwrap { position: relative; }
+.suggest { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; list-style: none; margin: 0; padding: 4px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.28); max-height: 340px; overflow: auto; }
+.suggest li { display: block; border-top: 0; padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.suggest li.on, .suggest li:hover { background: var(--bg); }
+.suggest li b { display: block; font-weight: 600; }
+.suggest li small { display: block; color: var(--muted); font-size: 0.85rem; }
+.suggest .src { padding: 6px 12px 4px; color: var(--muted); font-size: 0.72rem; cursor: default; }
+.suggest .src:hover { background: none; }
+.addpanel { display: flex; flex-direction: column; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+.addpanel .hint { margin: 0; }
+.addpanel label.top { margin-bottom: 0; }
+.sharebox input { font-family: var(--mono); font-size: 0.85rem; }
+.addrow { display: flex; gap: 10px; }
+.addrow input { flex: 1; min-width: 0; }
+.addrow button { width: auto; padding: 0 20px; }
+.pace { margin: 0; padding: 10px 14px; border-radius: 10px; font-weight: 500; background: var(--surface); border: 1px solid var(--line); }
+.pace.behind { border-color: var(--warn); color: var(--warn); }
+.acts { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; }
+button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: none; border: 0; box-shadow: none;
+  color: var(--accent); font: 600 0.85rem/1.2 var(--body); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.addr small.stopnote { color: var(--fg); background: var(--bg); border-left: 3px solid var(--accent); padding: 4px 8px; margin-top: 6px; border-radius: 0 6px 6px 0; white-space: pre-wrap; }
+.noteedit { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.noteedit textarea { min-height: 70px; font-size: 0.95rem; padding: 8px 10px; line-height: 1.4; }
+@media (max-width: 420px) { .opts { grid-template-columns: 1fr; } .row { flex-direction: column; } }
+@media (prefers-reduced-motion: no-preference) { #result:not([hidden]) { animation: in .25s ease-out; } }
+@keyframes in { from { opacity: .4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Shortest Stop Route</h1>
+    <p class="sub">Enter up to 12 stops. The route starts at your current address and visits every stop with the least total driving.</p>
+  </header>
+
+  <form id="form">
+    <div class="field">
+      <label class="top" for="start">Your current address <span>optional</span></label>
+      <input id="start" type="text" autocomplete="street-address" placeholder="Leave blank to use your location">
+    </div>
+    <section class="field sched" aria-labelledby="schedTitle">
+      <div class="tablehead">
+        <span class="top" id="schedTitle">Schedule</span>
+        <button id="jobOpen" type="button" class="mini">+ New job</button>
+      </div>
+      <div id="jobPanel" class="addpanel jobpanel" hidden>
+        <b class="jobtitle">New job</b>
+        <div class="jobgrid">
+          <div class="full"><label for="jobPlace">Address or place</label><input id="jobPlace" type="text" autocomplete="off" placeholder="Start typing, then pick a suggestion"></div>
+          <div><label for="jobName">Customer name</label><input id="jobName" type="text" autocomplete="off"></div>
+          <div><label for="jobPhone">Phone</label><input id="jobPhone" type="tel" autocomplete="off" inputmode="tel"></div>
+          <div class="full"><label for="jobNotes">Job details</label><input id="jobNotes" type="text" autocomplete="off" placeholder="Referral from…, roof inspection, gate code…"></div>
+          <div><label for="jobDate">Date</label><input id="jobDate" type="date"></div>
+          <div><label for="jobTime">Arrive <span class="opt">optional</span></label><input id="jobTime" type="text" autocomplete="off" placeholder="e.g. 2-4pm"></div>
+        </div>
+        <p class="hint">No date yet? Leave Date blank and it goes on your “Not scheduled yet” list, so the job isn't lost.</p>
+        <div class="row">
+          <button id="jobSave" type="button">Save job</button>
+          <button id="jobCancel" type="button" class="secondary">Cancel</button>
+        </div>
+      </div>
+      <div class="cal">
+        <div class="calnav">
+          <button id="calPrev" type="button" class="calbtn" aria-label="Previous month">‹</button>
+          <b id="calMonth" aria-live="polite"></b>
+          <button id="calNext" type="button" class="calbtn" aria-label="Next month">›</button>
+        </div>
+        <div class="calgrid calhead" aria-hidden="true"><span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span></div>
+        <div class="calgrid" id="calGrid"></div>
+      </div>
+      <div id="unsched" class="unsched" hidden>
+        <div class="unhead"><b>Not scheduled yet</b><span id="unCount"></span></div>
+        <ul id="unList"></ul>
+      </div>
+      <div class="backup">
+        <span id="backupInfo" class="hint"></span>
+        <span class="acts">
+          <button id="backupBtn" type="button" class="mini">Back up schedule</button>
+          <button id="restoreBtn" type="button" class="mini">Restore</button>
+        </span>
+        <input id="restoreFile" type="file" accept=".json,application/json" hidden>
+      </div>
+    </section>
+    <div class="field">
+      <div class="tablehead">
+        <span class="top" id="stopsLabel">Stops for today</span>
+        <span class="tablemeta"><span id="count">0 / 12</span><button id="clearStops" type="button" class="mini">Clear all</button></span>
+      </div>
+      <div class="stoptable" role="table" aria-labelledby="stopsLabel">
+        <div class="srow shead" role="row">
+          <span role="columnheader">#</span>
+          <span role="columnheader">Address or place</span>
+          <span role="columnheader">Arrive <i>optional</i></span>
+        </div>
+        <div id="stopRows" role="rowgroup"></div>
+      </div>
+      <textarea id="addresses" hidden aria-hidden="true" tabindex="-1"></textarea>
+      <p class="hint">Start typing and pick from the suggestions to lock in the exact spot. Put gas or food, like <code>Shell</code> or <code>Wendy's</code>, on the row right after a stop and it stays there. Start with <code>any</code>, like <code>any Kroger</code>, to let it go wherever fits best. Times can be <code>by 5pm</code>, <code>after 1pm</code> or <code>2-4pm</code>.</p>
+    </div>
+    <details id="optsBox">
+      <summary>Options: leave time, stop time, gas cost, route end</summary>
+      <div class="opts">
+        <div><label for="leave">Leave at</label><input id="leave" type="time"></div>
+        <div><label for="stay">Minutes at each stop</label><input id="stay" type="number" min="0" max="240" inputmode="numeric" placeholder="0"></div>
+        <div><label for="mpg">Your car's MPG</label><input id="mpg" type="number" min="1" max="200" step="0.1" inputmode="decimal" placeholder="25"></div>
+        <div><label for="price">Gas price, $ per gallon</label><input id="price" type="number" min="0" max="20" step="0.01" inputmode="decimal" placeholder="3.20"></div>
+        <div class="full"><label for="endMode">Route ends at</label>
+          <select id="endMode"><option value="last">The last stop</option><option value="start">Back where I started</option><option value="other">Another address</option></select></div>
+        <div class="full" id="endAddrWrap" hidden><label for="endAddr">End address</label><input id="endAddr" type="text" autocomplete="street-address" placeholder="e.g. 100 Main St, Dublin OH"></div>
+      </div>
+    </details>
+  </form>
+
+  <button id="go" type="submit" form="form">Find my route</button>
+  <p id="status" class="status" role="status" aria-live="polite"></p>
+
+  <div class="addbox">
+    <button id="addOpen" type="button" class="secondary">+ Add a stop</button>
+    <div id="addPanel" class="addpanel" hidden>
+      <label class="top" for="addStop">New stop</label>
+      <input id="addStop" type="text" placeholder="Address or store name, like Shell" autocomplete="off">
+      <p id="addHint" class="hint"></p>
+      <div class="row">
+        <button id="addBtn" type="button">Add stop to today's route</button>
+        <button id="addCancel" type="button" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="backupNudge" class="nudge" hidden role="status">
+    <span id="nudgeText">It's been a while since your last backup.</span>
+    <span class="nudgeBtns"><button id="nudgeBackup" type="button" class="mini">Back up now</button><button id="nudgeLater" type="button" class="mini">Later</button></span>
+  </div>
+  <section id="result" hidden>
+    <div class="totals">
+      <div><b id="tDist">–</b><small>total distance</small></div>
+      <div><b id="tTime">–</b><small>drive time</small></div>
+      <div><b id="tEnd">–</b><small>last stop</small></div>
+      <div id="costBox" hidden><b id="tCost">–</b><small>gas cost</small></div>
+    </div>
+    <button id="startDrive" type="button"><span aria-hidden="true">➤</span> Start driving</button>
+    <div id="map" role="img" aria-label="Map of the route"></div>
+    <p id="doneNote" class="note" hidden></p>
+    <p id="paceNote" class="pace" hidden></p>
+    <ol id="list"></ol>
+    <details id="dirWrap" hidden>
+      <summary id="dirSum">Turn-by-turn directions</summary>
+      <ol id="steps" aria-label="Turn-by-turn directions"></ol>
+    </details>
+    <div class="links" id="links"></div>
+    <p id="linkNote" class="note" hidden></p>
+    <div class="row">
+      <button id="replan" type="button" class="secondary">Re-plan from here</button>
+      <button id="share" type="button" class="secondary">Share route</button>
+    </div>
+    <div id="shareBox" class="sharebox" hidden>
+      <label for="shareLink" class="top">Route link</label>
+      <div class="addrow">
+        <input id="shareLink" type="text" readonly>
+        <button id="copyBtn" type="button" class="secondary">Copy</button>
+      </div>
+    </div>
+    <p id="note" class="note"></p>
+    <p id="warnNote" class="note warn" hidden></p>
+  </section>
+  <details id="logBox">
+    <summary id="logSum">Mileage log</summary>
+    <div class="logIn">
+      <div class="logCards" id="logCards"></div>
+      <p id="logEmpty" class="note">No miles logged yet. Check off stops as you finish them, or use Start driving, and each day's miles show up here.</p>
+      <div class="tableWrap" id="logTableWrap" hidden>
+        <table class="logTable">
+          <thead><tr><th scope="col">Day</th><th scope="col">Stops</th><th scope="col">Miles</th><th scope="col">GPS mi</th><th scope="col">Drive</th><th scope="col">Gas</th><th scope="col" class="rateCol">Rate $</th></tr></thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+      <div class="logOpts">
+        <div><label for="mileRate">Reimbursement, $ per mile <span class="opt">optional</span></label><input id="mileRate" type="number" min="0" max="5" step="0.001" inputmode="decimal" placeholder="e.g. 0.70"></div>
+        <div><label for="logRange">Export</label><select id="logRange"><option value="month">This month</option><option value="last">Last month</option><option value="year">This year</option><option value="all">Everything</option></select></div>
+      </div>
+      <button id="logExport" type="button" class="secondary">Export mileage (CSV for Excel or Sheets)</button>
+      <p class="note">Miles are the road distance of each leg you finished, counted once per stop. GPS miles are what driving mode actually tracked. The log stays on this device and is included in schedule backups.</p>
+    </div>
+  </details>
+  <p class="note">Version 26 · Nov 11, 2026</p>
+</main>
+
+<div id="updateBar" hidden role="status"><span>A new version of the app is ready.</span><button id="updateBtn" type="button">Update now</button></div>
+
+<div id="nav" hidden role="dialog" aria-label="Driving mode">
+  <div class="navTop" aria-live="polite">
+    <div id="navArrow" aria-hidden="true">◎</div>
+    <div id="navDist"></div>
+    <div id="navText">Finding your location…</div>
+    <div id="navSub"></div>
+    <p id="navStatus" hidden></p>
+  </div>
+  <div class="navMapWrap">
+    <div id="navMap"></div>
+    <button id="navRecenter" type="button" hidden>Re-center</button>
+  </div>
+  <div class="navBottom">
+    <div id="navArrive" hidden>
+      <button id="navDone" type="button">Mark done · next stop</button>
+      <button id="navSkip" type="button" class="secondary">Skip to next stop</button>
+    </div>
+    <div class="navInfo"><span id="navNext"></span><span id="navEta"></span></div>
+    <div class="navBtns">
+      <button id="navVoice" type="button" class="secondary" aria-pressed="true">Voice on</button>
+      <button id="navExit" type="button" class="secondary">Exit</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const MAX = 12, PER_CHAIN = 6;
+const $ = id => document.getElementById(id);
+const box = $("addresses"), btn = $("go"), statusEl = $("status");
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+};
+// Ask the browser not to clear saved schedules when it tidies up storage.
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {}); } catch (e) {}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ---------- Saved inputs ----------
+// ---------- Schedule: each day keeps its own list of stops ----------
+const pad2 = n => String(n).padStart(2, "0");
+const dkey = d => d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+const keyDate = k => { const [y, m, d] = k.split("-").map(Number); return new Date(y, m - 1, d); };
+const todayKey = () => dkey(new Date());
+const dayName = k => k === todayKey() ? "today" : keyDate(k).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+function daysBook() { try { return JSON.parse(store.get("days") || "{}"); } catch (e) { return {}; } }
+function saveDays(b) { store.set("days", JSON.stringify(b)); }
+function dayText(k) { return daysBook()[k] || ""; }
+function dayCount(k) { return dayText(k).split("\n").filter(x => x.trim()).length; }
+let selDay = todayKey(), calReady = false;
+// First time with the calendar: today's stops are whatever was in the list before.
+if (!store.get("days") && store.get("stops")) { const b = {}; b[selDay] = store.get("stops"); saveDays(b); }
+box.value = dayText(selDay);
+// Build the 12 rows from the saved list.
+const rowsEl = $("stopRows"), rows = [];
+for (let i = 0; i < MAX; i++) {
+  const row = document.createElement("div");
+  row.className = "srow"; row.setAttribute("role", "row");
+  const num = document.createElement("span");
+  num.className = "num"; num.textContent = i + 1; num.setAttribute("role", "cell");
+  const stop = document.createElement("input");
+  stop.type = "text"; stop.className = "stopIn"; stop.id = "stop" + i; stop.autocomplete = "off"; stop.spellcheck = false;
+  stop.setAttribute("aria-label", "Stop " + (i + 1) + ", address or place");
+  stop.placeholder = i === 0 ? "e.g. 123 Main St, Columbus, OH" : i === 1 ? "e.g. Shell" : "";
+  const time = document.createElement("input");
+  time.type = "text"; time.className = "timeIn"; time.autocomplete = "off";
+  time.setAttribute("aria-label", "Arrival time for stop " + (i + 1) + ", optional");
+  time.placeholder = i === 0 ? "e.g. by 5pm" : "";
+  const cell = document.createElement("div");
+  cell.setAttribute("role", "cell"); cell.style.minWidth = "0"; cell.append(stop);
+  row.append(num, cell, time);
+  rowsEl.append(row);
+  rows.push({ row, stop, time });
+}
+function rowsFromText(text) {
+  const ls = (text || "").split("\n").map(x => x.trim()).filter(Boolean);
+  rows.forEach((r, i) => {
+    const l = ls[i] || "", at = l.lastIndexOf("@");
+    r.stop.value = at >= 0 ? l.slice(0, at).trim() : l;
+    r.time.value = at >= 0 ? l.slice(at + 1).trim() : "";
+  });
+  markRows();
+}
+function markRows() { rows.forEach(r => r.row.classList.toggle("filled", !!r.stop.value.trim())); }
+function syncFromRows() {
+  box.value = rows.map(r => {
+    const st = r.stop.value.trim(), tm = r.time.value.trim().replace(/^@\s*/, "");
+    return st ? st + (tm ? " @ " + tm : "") : "";
+  }).filter(Boolean).join("\n");
+  markRows();
+  updateCount();
+}
+rowsFromText(box.value);
+rows.forEach((r, i) => {
+  r.stop.addEventListener("input", syncFromRows);
+  r.time.addEventListener("input", syncFromRows);
+  // Enter moves down to the next row instead of submitting.
+  for (const f of [r.stop, r.time]) f.addEventListener("keydown", e => {
+    if (e.key !== "Enter" || e.defaultPrevented) return;
+    e.preventDefault();
+    const next = rows[i + 1];
+    if (next) next.stop.focus(); else btn.focus();
+  });
+});
+$("clearStops").addEventListener("click", () => {
+  if (!rows.some(r => r.stop.value || r.time.value)) return;
+  rows.forEach(r => { r.stop.value = ""; r.time.value = ""; });
+  syncFromRows();
+  rows[0].stop.focus();
+});
+for (const id of ["start", "stay", "mpg", "price"]) {
+  $(id).value = store.get(id) || "";
+  $(id).addEventListener("input", () => {
+    store.set(id, $(id).value);
+    if (route && (id === "mpg" || id === "price")) renderTotals();
+  });
+}
+$("endMode").value = store.get("endMode") || "last";
+$("endAddr").value = store.get("endAddr") || "";
+const syncEnd = () => { $("endAddrWrap").hidden = $("endMode").value !== "other"; };
+$("endMode").addEventListener("change", () => { store.set("endMode", $("endMode").value); syncEnd(); if ($("endMode").value === "other") $("endAddr").focus(); });
+$("endAddr").addEventListener("input", () => store.set("endAddr", $("endAddr").value));
+syncEnd();
+if (store.get("mpg") || store.get("price") || store.get("stay") || (store.get("endMode") || "last") !== "last") $("optsBox").open = true;
+
+const lines = () => box.value.split("\n").map(s => s.trim()).filter(Boolean);
+function updateCount() {
+  const n = lines().length;
+  $("count").textContent = n + " / " + MAX;
+  $("count").className = n > MAX ? "over" : "";
+  const b = daysBook();
+  if (box.value.trim()) b[selDay] = box.value; else delete b[selDay];
+  saveDays(b);
+  if (typeof renderCal === "function" && calReady) renderCal();
+}
+box.addEventListener("input", updateCount);
+updateCount();
+attachSuggest($("start"), {
+  query: () => $("start").value,
+  onPick: it => { $("start").value = it.text; store.set("start", it.text); }
+});
+rows.forEach(r => attachSuggest(r.stop, {
+  query: () => r.stop.value,
+  onPick: it => { r.stop.value = it.text; syncFromRows(); r.time.focus(); }
+}));
+
+let calMonth = new Date(); calMonth.setDate(1);
+function renderCal() {
+  const grid = $("calGrid"), y = calMonth.getFullYear(), m = calMonth.getMonth(), today = todayKey();
+  $("calMonth").textContent = calMonth.toLocaleDateString([], { month: "long", year: "numeric" });
+  grid.replaceChildren();
+  const first = new Date(y, m, 1).getDay(), last = new Date(y, m + 1, 0).getDate();
+  for (let i = 0; i < first; i++) grid.append(document.createElement("span"));
+  const book = daysBook();
+  for (let d = 1; d <= last; d++) {
+    const k = dkey(new Date(y, m, d)), n = (book[k] || "").split("\n").filter(x => x.trim()).length;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "calday" + (k === today ? " today" : "") + (k === selDay ? " sel" : "") + (k < today ? " past" : "") + (n >= MAX ? " full" : "");
+    b.dataset.day = k;
+    b.setAttribute("aria-label", keyDate(k).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }) + (n ? ", " + n + (n === 1 ? " job" : " jobs") : ""));
+    if (k === selDay) b.setAttribute("aria-current", "date");
+    const num = document.createElement("span"); num.textContent = d;
+    b.append(num);
+    if (n) { const j = document.createElement("span"); j.className = "jobs"; j.textContent = n; b.append(j); }
+    grid.append(b);
+  }
+  renderUnsched();
+  renderBackupInfo();
+}
+$("calGrid").addEventListener("click", e => { const b = e.target.closest("button[data-day]"); if (b) selectDay(b.dataset.day); });
+$("calPrev").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() - 1); renderCal(); });
+$("calNext").addEventListener("click", () => { calMonth.setMonth(calMonth.getMonth() + 1); renderCal(); });
+
+// Switching days loads that day's stops into the table. A route you're driving stays with its own day.
+function selectDay(k) {
+  selDay = k;
+  box.value = dayText(k);
+  rowsFromText(box.value);
+  updateCount();
+  const d = keyDate(k);
+  if (d.getMonth() !== calMonth.getMonth() || d.getFullYear() !== calMonth.getFullYear()) { calMonth = new Date(d.getFullYear(), d.getMonth(), 1); }
+  renderCal();
+  showDay();
+}
+function showDay() {
+  $("stopsLabel").textContent = "Stops for " + dayName(selDay);
+  const routeHere = !!(route && (route.day || todayKey()) === selDay);
+  $("result").hidden = !route || !routeHere;
+  if (routeHere) setTimeout(() => { if (map) map.invalidateSize(); drawMap(); }, 0);
+  updateAddUI();
+  if (route && !routeHere) setStatus("Planning " + dayName(selDay) + ". Your route for " + dayName(route.day || todayKey()) + " is saved; tap that day to see it.");
+  else if (statusEl.textContent.startsWith("Planning ")) setStatus("");
+}
+
+// ---------- New job (for the referral you get while you're on a job) ----------
+function openJob() {
+  $("jobPanel").hidden = false; $("jobOpen").hidden = true;
+  $("jobDate").value = selDay >= todayKey() ? selDay : "";
+  $("jobPlace").focus();
+}
+function closeJob() {
+  $("jobPanel").hidden = true; $("jobOpen").hidden = false;
+  for (const id of ["jobPlace", "jobName", "jobPhone", "jobNotes", "jobTime"]) $(id).value = "";
+}
+$("jobOpen").addEventListener("click", openJob);
+$("jobCancel").addEventListener("click", closeJob);
+attachSuggest($("jobPlace"), { query: () => $("jobPlace").value, onPick: it => { $("jobPlace").value = it.text; $("jobName").focus(); } });
+function unBook() { try { return JSON.parse(store.get("unscheduled") || "[]"); } catch (e) { return []; } }
+function saveUn(list) { store.set("unscheduled", JSON.stringify(list)); }
+// Put a job on a day. Returns an error message, or "" when it worked.
+function scheduleJob(job, k) {
+  const b = daysBook(), ls = (b[k] || "").split("\n").filter(x => x.trim());
+  if (ls.length >= MAX) return dayName(k) + " already has " + MAX + " stops, the most one route can hold. Pick another day.";
+  ls.push(job.place + (job.time ? " @ " + job.time : ""));
+  b[k] = ls.join("\n");
+  saveDays(b);
+  if (k === selDay) { box.value = b[k]; rowsFromText(box.value); updateCount(); }
+  return "";
+}
+$("jobSave").addEventListener("click", () => {
+  const place = $("jobPlace").value.trim().replace(/@/g, " ");
+  if (!place) { $("jobPlace").focus(); return setStatus("Add the job's address or place first.", true); }
+  const time = $("jobTime").value.trim();
+  if (time && !parseWindow(time)) { $("jobTime").focus(); return setStatus("Couldn't read that time. Try “by 5pm”, “after 1pm” or “2-4pm”.", true); }
+  const note = [$("jobName").value.trim(), $("jobPhone").value.trim(), $("jobNotes").value.trim()].filter(Boolean).join(" · ");
+  if (note) rememberNote(place, note);
+  const job = { place, time, note, added: Date.now() };
+  const k = $("jobDate").value;
+  if (k) {
+    const err = scheduleJob(job, k);
+    if (err) return setStatus(err, true);
+    closeJob(); renderCal();
+    setStatus("Saved to " + dayName(k) + ". That day now has " + dayCount(k) + (dayCount(k) === 1 ? " job." : " jobs."));
+  } else {
+    const list = unBook(); list.push(job); saveUn(list);
+    closeJob(); renderCal();
+    setStatus("Saved to “Not scheduled yet.” Pick a date for it whenever you're ready.");
+  }
+});
+// ---------- Backup and restore ----------
+// Everything you'd hate to lose: every day's jobs, the unscheduled list, stop notes, picked places and settings.
+const BACKUP_KEYS = ["days", "unscheduled", "notes", "picks", "route", "start", "stay", "mpg", "price", "lastPos", "endMode", "endAddr", "mileLog", "mileRate"];
+function renderBackupInfo() {
+  const last = +store.get("lastBackup") || 0, el = $("backupInfo");
+  const hasData = Object.keys(daysBook()).length || unBook().length;
+  if (!last) { el.textContent = hasData ? "Not backed up yet." : "Back up your schedule to keep it safe."; el.className = "hint" + (hasData ? " stale" : ""); renderNudge(); return; }
+  const daysAgo = Math.floor((Date.now() - last) / 86400000);
+  el.textContent = "Last backup: " + new Date(last).toLocaleDateString([], { month: "short", day: "numeric" }) + (daysAgo >= 7 ? " (over a week ago)" : "");
+  el.className = "hint" + (daysAgo >= 7 && hasData ? " stale" : "");
+  renderNudge();
+}
+$("backupBtn").addEventListener("click", async () => {
+  const data = { app: "shortest-stop-route", version: 1, saved: new Date().toISOString(), data: {} };
+  for (const k of BACKUP_KEYS) { const v = store.get(k); if (v != null) data.data[k] = v; }
+  const name = "route-schedule-backup-" + todayKey() + ".json";
+  const file = new File([JSON.stringify(data, null, 1)], name, { type: "application/json" });
+  // On a phone, the share menu lets you save it to Files, iCloud Drive or email it to yourself.
+  if (isPhone && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], title: "Route schedule backup" });
+      store.set("lastBackup", String(Date.now())); renderBackupInfo();
+      return setStatus("Backup saved. Keep it somewhere safe, like Files, iCloud Drive or your email.");
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  store.set("lastBackup", String(Date.now())); renderBackupInfo();
+  setStatus("Backup downloaded as " + name + ". Keep it somewhere safe, like iCloud Drive, Google Drive or your email.");
+});
+$("restoreBtn").addEventListener("click", () => $("restoreFile").click());
+$("restoreFile").addEventListener("change", async () => {
+  const f = $("restoreFile").files[0];
+  $("restoreFile").value = "";
+  if (!f) return;
+  let b;
+  try { b = JSON.parse(await f.text()); } catch (e) { return setStatus("That file isn't a schedule backup.", true); }
+  if (!b || b.app !== "shortest-stop-route" || !b.data) return setStatus("That file isn't a schedule backup from this site.", true);
+  const d = b.data, parse = (v, dflt) => { try { return JSON.parse(v); } catch (e) { return dflt; } };
+  const theirDays = parse(d.days || "{}", {}), theirUn = parse(d.unscheduled || "[]", []);
+  const nDays = Object.keys(theirDays).length;
+  if (!window.confirm("Restore the backup from " + new Date(b.saved).toLocaleDateString() + "? Its jobs (" + nDays + (nDays === 1 ? " day" : " days") +
+    (theirUn.length ? ", " + theirUn.length + " unscheduled" : "") + ") will be added to what's already here. Nothing here gets deleted.")) return;
+  // Merge, never replace: jobs added since the backup stay put.
+  const days = daysBook(), un = unBook(), seen = new Set(un.map(j => pickKey(j.place)));
+  let added = 0;
+  for (const [k, text] of Object.entries(theirDays)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || typeof text !== "string") continue;
+    const mine = (days[k] || "").split("\n").filter(x => x.trim());
+    const have = new Set(mine.map(pickKey));
+    for (const l of text.split("\n").map(x => x.trim()).filter(Boolean)) {
+      if (have.has(pickKey(l))) continue;
+      if (mine.length < MAX) { mine.push(l); have.add(pickKey(l)); added++; }
+      else if (!seen.has(pickKey(l))) { const at = l.lastIndexOf("@"); un.push({ place: at >= 0 ? l.slice(0, at).trim() : l, time: at >= 0 ? l.slice(at + 1).trim() : "", note: "Was on " + dayName(k) + " (that day was full)", added: Date.now() }); seen.add(pickKey(l)); added++; }
+    }
+    if (mine.length) days[k] = mine.join("\n");
+  }
+  for (const j of Array.isArray(theirUn) ? theirUn : []) {
+    if (j && typeof j.place === "string" && !seen.has(pickKey(j.place))) { un.push(j); seen.add(pickKey(j.place)); added++; }
+  }
+  saveDays(days); saveUn(un);
+  for (const k of ["notes", "picks"]) {   // keep your newer notes when both have one
+    const merged = { ...parse(d[k] || "{}", {}), ...parse(store.get(k) || "{}", {}) };
+    store.set(k, JSON.stringify(merged));
+  }
+  for (const k of ["start", "stay", "mpg", "price", "lastPos", "endMode", "endAddr", "mileRate"]) if (d[k] != null && !store.get(k)) store.set(k, d[k]);
+  mergeMileLog(parse(d.mileLog || "{}", {}));
+  if (!route && d.route) { const r = parse(d.route, null); if (validRoute(r)) setRoute(r); }
+  selectDay(selDay);
+  setStatus(added ? "Restored " + added + (added === 1 ? " job" : " jobs") + " from your backup." : "Everything in that backup was already here.");
+});
+
+function renderUnsched() {
+  const list = unBook(), ul = $("unList");
+  $("unsched").hidden = !list.length;
+  $("unCount").textContent = list.length ? list.length + (list.length === 1 ? " job" : " jobs") : "";
+  ul.replaceChildren();
+  list.forEach((job, i) => {
+    const li = document.createElement("li");
+    const t = document.createElement("span"); t.textContent = job.place; li.append(t);
+    if (job.note) { const n = document.createElement("small"); n.textContent = job.note; li.append(n); }
+    const added = document.createElement("small"); added.textContent = "Added " + new Date(job.added).toLocaleDateString([], { month: "short", day: "numeric" }) + (job.time ? " · arrive " + job.time : ""); li.append(added);
+    const acts = document.createElement("div"); acts.className = "acts";
+    const lab = document.createElement("label"); lab.className = "sr"; lab.htmlFor = "un" + i; lab.textContent = "Schedule " + job.place + " on";
+    const date = document.createElement("input"); date.type = "date"; date.id = "un" + i; date.min = todayKey();
+    date.addEventListener("change", () => {
+      if (!date.value) return;
+      const err = scheduleJob(job, date.value);
+      if (err) { date.value = ""; return setStatus(err, true); }
+      const l2 = unBook(); l2.splice(i, 1); saveUn(l2); renderCal();
+      setStatus("Scheduled “" + job.place + "” for " + dayName(date.value) + ".");
+    });
+    const sched = document.createElement("span"); sched.className = "hint"; sched.textContent = "Schedule for:";
+    const del = document.createElement("button"); del.type = "button"; del.className = "mini"; del.textContent = "Remove";
+    del.addEventListener("click", () => {
+      if (!window.confirm("Remove “" + job.place + "” from your list? This can't be undone.")) return;
+      const l2 = unBook(); l2.splice(i, 1); saveUn(l2); renderCal();
+    });
+    acts.append(sched, lab, date, del);
+    li.append(acts);
+    ul.append(li);
+  });
+}
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = "status" + (isError ? " error" : "");
+}
+
+// ---------- Place suggestions as you type ----------
+// A place you tap is remembered with its exact location, so it never has to be looked up (or guessed) again.
+function picksBook() { try { return JSON.parse(store.get("picks") || "{}"); } catch (e) { return {}; } }
+const pickKey = t => (t || "").toLowerCase().replace(/@.*$/, "").replace(/\s+/g, " ").trim();
+function pickFor(text) { return picksBook()[pickKey(text)] || null; }
+function savePick(text, p) {
+  const b = picksBook();
+  b[pickKey(text)] = { lat: p.lat, lon: p.lon, label: p.label };
+  const keys = Object.keys(b);
+  if (keys.length > 300) delete b[keys[0]];
+  store.set("picks", JSON.stringify(b));
+}
+// Favor places near your next stop, or near where you last started.
+function biasPoint() {
+  if (typeof route !== "undefined" && route) return route.stops.find(x => !x.done) || route.start;
+  try { return JSON.parse(store.get("lastPos") || "null"); } catch (e) { return null; }
+}
+// "75 S Sandusky St, Delaware" → "75 S Sandusky St, Delaware, OH 43015"
+function censusItem(m) {
+  const tc = s => s.toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase());
+  const parts = m.matchedAddress.split(",").map(s => s.trim());
+  const zip = parts.length > 3 ? parts.pop() : "", st = parts.length > 2 ? parts.pop() : "";
+  const street = tc(parts[0] || ""), city = tc(parts.slice(1).join(", "));
+  const text = [street, city, [st, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  return { title: street, sub: [city, [st, zip].filter(Boolean).join(" ")].filter(Boolean).join(", "), text,
+    lat: +m.coordinates.y, lon: +m.coordinates.x, label: text, exact: true };
+}
+// Esri's address search fills in partly typed addresses ("75 S Sandus" → 75 S Sandusky St, Delaware, OH).
+// Its suggestions carry no location yet; tapping one looks it up with arcgisLocate.
+const ARCGIS = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/";
+async function arcgisSuggest(q, b, signal) {
+  const loc = b && isFinite(b.lat) ? (+b.lon).toFixed(4) + "," + (+b.lat).toFixed(4) : "-82.9,40.2";
+  const res = await fetch(ARCGIS + "suggest?f=json&countryCode=USA&maxSuggestions=6&location=" + loc + "&text=" + encodeURIComponent(q), { signal });
+  if (!res.ok) return [];
+  return ((await res.json()).suggestions || []).filter(x => !x.isCollection).map(x => {
+    const parts = x.text.replace(/,\s*USA$/, "").split(",").map(t => t.trim());
+    if (parts.length >= 3 && /^\d{5}$/.test(parts[parts.length - 1])) parts.splice(-2, 2, parts[parts.length - 2] + " " + parts[parts.length - 1]);
+    const text = parts.join(", ");
+    return { title: parts[0], sub: parts.slice(1).join(", "), text, label: text, magicKey: x.magicKey, lat: NaN, lon: NaN, exact: true };
+  });
+}
+async function arcgisLocate(it) {
+  const res = await fetch(ARCGIS + "findAddressCandidates?f=json&maxLocations=1&magicKey=" + encodeURIComponent(it.magicKey) + "&SingleLine=" + encodeURIComponent(it.text));
+  const c = res.ok && ((await res.json()).candidates || [])[0];
+  return c ? { lat: c.location.y, lon: c.location.x } : null;
+}
+async function suggestPlaces(q, signal) {
+  // OpenStreetMap is missing many Ohio house numbers, so a street address also asks Esri (partly typed)
+  // and the Census (fully typed); their matches go first. Place names lead with OpenStreetMap.
+  const isAddr = /^\d+[a-z]?\s+\S/i.test(q);
+  const esri = arcgisSuggest(q, biasPoint(), signal).catch(e => { if (e.name === "AbortError") throw e; return []; });
+  const census = isAddr && /^\d+[a-z]?\s+\S+\s+\S/i.test(q) ? censusMatches(q).catch(() => []) : Promise.resolve([]);
+  const b = biasPoint();
+  let url = "https://photon.komoot.io/api/?limit=10&lang=en&q=" + encodeURIComponent(q);
+  if (b && isFinite(b.lat)) url += "&lat=" + (+b.lat).toFixed(4) + "&lon=" + (+b.lon).toFixed(4);
+  let features = [];
+  try {
+    const res = await fetch(url, { signal });
+    if (res.ok) features = (await res.json()).features || [];
+  } catch (e) { if (e.name === "AbortError") throw e; }
+  const osm = [];
+  for (const f of features) {
+    const p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
+    if (!c) continue;
+    const street = [p.housenumber, p.street].filter(Boolean).join(" ");
+    const city = p.city || p.town || p.village || p.locality || p.district || p.county || "";
+    const st = p.state ? (STATES[p.state.toLowerCase()] || p.state) : "";
+    const stZip = [st, p.postcode].filter(Boolean).join(" ");
+    const name = p.name && p.name !== street && p.name !== city ? p.name : "";
+    const where = [street, city, stZip].filter(Boolean).join(", ");
+    if (!where) continue;
+    osm.push({
+      title: name || street || city, sub: name ? where : [city, stZip].filter(Boolean).join(", "), text: name ? name + ", " + where : where,
+      lat: c[1], lon: c[0], label: name ? name + " — " + [street, city, st].filter(Boolean).join(", ") : where
+    });
+  }
+  const esriItems = await esri, censusItems = (await census).slice(0, 3).map(censusItem);
+  // For a street address, only keep OpenStreetMap matches in the U.S. with the same house number.
+  const num = isAddr ? q.match(/^\d+/)[0] : "";
+  const osmAddr = osm.filter(it => it.text.startsWith(num + " ") && /\b[A-Z]{2}( \d{5})?$/.test(it.sub));
+  const order = isAddr ? [esriItems.slice(0, 4), censusItems, osmAddr] : [osm.slice(0, 4), esriItems];
+  // Same street and city counts as the same place, whatever the ZIP or capitalization.
+  const key = it => it.text.toLowerCase().replace(/\s+\d{5}(-\d{4})?\b/g, "").replace(/\s+/g, " ");
+  const out = [], seen = new Set();
+  for (const list of order) for (const it of list) {
+    if (out.length === 6) break;
+    if (seen.has(key(it))) continue;
+    seen.add(key(it)); out.push(it);
+  }
+  return out;
+}
+function attachSuggest(field, opts) {
+  const wrap = document.createElement("div");
+  wrap.className = "sugwrap";
+  field.parentNode.insertBefore(wrap, field);
+  wrap.append(field);
+  const list = document.createElement("ul");
+  list.className = "suggest"; list.id = field.id + "Sug"; list.hidden = true;
+  list.setAttribute("role", "listbox");
+  wrap.append(list);
+  field.setAttribute("aria-autocomplete", "list");
+  field.setAttribute("aria-controls", list.id);
+  field.setAttribute("aria-expanded", "false");
+  let items = [], active = -1, timer = null, ctl = null, seq = 0;
+  const close = () => { list.hidden = true; items = []; active = -1; field.setAttribute("aria-expanded", "false"); field.removeAttribute("aria-activedescendant"); };
+  const pick = async i => {
+    const it = items[i]; close();
+    if (!it) return;
+    if (it.magicKey && !isFinite(it.lat)) { const g = await arcgisLocate(it).catch(() => null); if (g) Object.assign(it, g); }
+    if (isFinite(it.lat)) savePick(it.text, it);
+    opts.onPick(it);
+  };
+  const show = () => {
+    list.replaceChildren();
+    items.forEach((it, i) => {
+      const li = document.createElement("li");
+      li.id = list.id + i; li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", i === active ? "true" : "false");
+      if (i === active) li.className = "on";
+      const b = document.createElement("b"); b.textContent = it.title;
+      const sm = document.createElement("small"); sm.textContent = it.sub;
+      li.append(b, sm);
+      li.addEventListener("pointerdown", e => { e.preventDefault(); pick(i); });
+      list.append(li);
+    });
+    if (items.length) {
+      const src = document.createElement("li");
+      src.className = "src"; src.setAttribute("role", "presentation");
+      src.textContent = items.some(it => it.exact) ? "Addresses from Esri, the U.S. Census and OpenStreetMap" : "Places from OpenStreetMap";
+      list.append(src);
+    }
+    list.hidden = !items.length;
+    field.setAttribute("aria-expanded", items.length ? "true" : "false");
+    if (active >= 0) field.setAttribute("aria-activedescendant", list.id + active); else field.removeAttribute("aria-activedescendant");
+  };
+  field.addEventListener("input", () => {
+    clearTimeout(timer);
+    const q = (opts.query() || "").trim();
+    if (q.length < 3 || /^any\s/i.test(q)) { seq++; return close(); }
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      if (ctl) ctl.abort();
+      ctl = new AbortController();
+      try {
+        const res = await suggestPlaces(q, ctl.signal);
+        if (my !== seq) return;
+        items = res; active = -1; show();
+      } catch (e) {}
+    }, 280);
+  });
+  field.addEventListener("keydown", e => {
+    if (list.hidden || !items.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % items.length; show(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + items.length) % items.length; show(); }
+    else if (e.key === "Enter" && active >= 0) { e.preventDefault(); pick(active); }
+    else if (e.key === "Escape") { e.preventDefault(); close(); }
+  });
+  field.addEventListener("blur", () => setTimeout(close, 150));
+}
+// The stops box: suggestions for the line you're typing; tapping one fills in that line.
+function currentLine(ta) {
+  const v = ta.value, caret = ta.selectionStart;
+  const a = v.lastIndexOf("\n", caret - 1) + 1, z = v.indexOf("\n", caret);
+  return { a, z: z < 0 ? v.length : z, text: v.slice(a, z < 0 ? v.length : z) };
+}
+
+// ---------- Reading each line: "any X" stops and "@ time" windows ----------
+function parseTime(s) {
+  s = s.trim().toLowerCase().replace(/\./g, "");
+  if (s === "noon") return 720;
+  if (s === "midnight") return 0;
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm|a|p)?$/.exec(s);
+  if (!m) return null;
+  let h = +m[1]; const mi = +(m[2] || 0), ap = m[3];
+  if (h > 23 || mi > 59) return null;
+  if (ap) {
+    if (h < 1 || h > 12) return null;
+    if (ap[0] === "p" && h < 12) h += 12;
+    if (ap[0] === "a" && h === 12) h = 0;
+  } else if (!m[2] || m[1].length === 1) {
+    if (h >= 1 && h <= 6) h += 12; // "by 5" means 5 pm, not 5 am
+  }
+  return h * 60 + mi;
+}
+function parseWindow(s) {
+  s = s.trim().toLowerCase();
+  let m;
+  if ((m = /^(?:by|before|until)\s+(.+)$/.exec(s))) { const c = parseTime(m[1]); return c == null ? null : { open: null, close: c }; }
+  if ((m = /^(?:after|from)\s+(.+)$/.exec(s))) { const o = parseTime(m[1]); return o == null ? null : { open: o, close: null }; }
+  if ((m = /^(.+?)\s*(?:-|–|to)\s*(.+)$/.exec(s))) {
+    let o = parseTime(m[1]); const c = parseTime(m[2]);
+    if (o == null || c == null) return null;
+    // "2-4pm": borrow the pm from the end time
+    if (!/[ap]/.test(m[1]) && /p/.test(m[2]) && o < 720 && o + 720 <= c) o += 720;
+    return c > o ? { open: o, close: c } : null;
+  }
+  const t = parseTime(s);
+  return t == null ? null : { open: null, close: t };
+}
+function parseLine(raw, i) {
+  let text = raw, win = null;
+  const at = raw.lastIndexOf("@");
+  if (at >= 0) {
+    win = parseWindow(raw.slice(at + 1));
+    if (!win) throw new Error("Couldn't read the arrival time on stop " + (i + 1) + ", “" + raw + "”. Try “by 5pm”, “after 1pm” or “2-4pm”.");
+    text = raw.slice(0, at).trim();
+  }
+  // No house number means a place name ("Shell gas station", "Wendy's", "a pharmacy").
+  // Plain names stay right after the line above; "any …" can go wherever fits best.
+  // A name with a city ("COSI, Columbus, OH") is a destination, so it gets ordered like an address.
+  let chain = null, float = false;
+  if (!/\d/.test(text) && !/^any\s/i.test(text) && text.includes(",")) {
+    // destination: looked up and ordered with the other addresses
+  } else if (!/\d/.test(text)) {
+    const m = /^any\s+(.+)$/i.exec(text);
+    if (m) { chain = m[1].trim(); float = true; }
+    else chain = text.replace(/^(?:an|a)\s+/i, "").trim();
+  }
+  return { input: raw, text, chain, float, win };
+}
+const fmtClock = d => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function fmtMin(min) { const d = new Date(); d.setHours(0, min, 0, 0); return fmtClock(d); }
+function winText(w) {
+  if (!w) return "";
+  if (w.open != null && w.close != null) return fmtMin(w.open) + "–" + fmtMin(w.close);
+  return w.open != null ? "after " + fmtMin(w.open) : "by " + fmtMin(w.close);
+}
+// Window as seconds after departure (same calendar day as departure).
+function winSecs(w, dep) {
+  if (!w) return null;
+  const day = new Date(dep); day.setHours(0, 0, 0, 0);
+  const f = m => m == null ? null : (day.getTime() + m * 60000 - dep) / 1000;
+  return { open: f(w.open), close: f(w.close) };
+}
+
+// ---------- Your location ----------
+function tryLocation(opts) {
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      err => reject(err), opts);
+  });
+}
+async function getLocation() {
+  if (!navigator.geolocation) throw { code: 0 };
+  try {
+    return await tryLocation({ enableHighAccuracy: true, timeout: 10000, maximumAge: 300000 });
+  } catch (err) {
+    if (err.code === 1) throw err;
+    return await tryLocation({ enableHighAccuracy: false, timeout: 20000, maximumAge: 600000 });
+  }
+}
+
+// ---------- Address lookup: Census, then OpenStreetMap, then Photon ----------
+let jsonpId = 0;
+async function censusLookup(q) {
+  const m = (await censusMatches(q))[0];
+  return m ? { lat: +m.coordinates.y, lon: +m.coordinates.x, label: m.matchedAddress } : null;
+}
+function censusMatches(q) {
+  return new Promise((resolve, reject) => {
+    const cb = "censusCb" + (++jsonpId);
+    const s = document.createElement("script");
+    const done = () => { delete window[cb]; s.remove(); clearTimeout(timer); };
+    const timer = setTimeout(() => { done(); reject(new Error("timeout")); }, 9000);
+    window[cb] = data => {
+      done();
+      resolve((data && data.result && data.result.addressMatches) || []);
+    };
+    s.onerror = () => { done(); reject(new Error("network")); };
+    s.src = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=jsonp&callback=" +
+      cb + "&address=" + encodeURIComponent(q);
+    document.head.append(s);
+  });
+}
+// OpenStreetMap's Nominatim allows one request per second, so only those calls wait.
+// Calls line up one at a time, even when several searches run together.
+let lastNom = 0, nomQueue = Promise.resolve();
+function nomGate() {
+  const turn = nomQueue.then(async () => {
+    const wait = lastNom + 1100 - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastNom = Date.now();
+  });
+  nomQueue = turn.catch(() => {});
+  return turn;
+}
+// "2187 Neil Ave, Columbus, OH" instead of the full county-and-country version.
+const STATES = { alabama:"AL",alaska:"AK",arizona:"AZ",arkansas:"AR",california:"CA",colorado:"CO",connecticut:"CT",delaware:"DE",
+  "district of columbia":"DC",florida:"FL",georgia:"GA",hawaii:"HI",idaho:"ID",illinois:"IL",indiana:"IN",iowa:"IA",kansas:"KS",
+  kentucky:"KY",louisiana:"LA",maine:"ME",maryland:"MD",massachusetts:"MA",michigan:"MI",minnesota:"MN",mississippi:"MS",missouri:"MO",
+  montana:"MT",nebraska:"NE",nevada:"NV","new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY","north carolina":"NC",
+  "north dakota":"ND",ohio:"OH",oklahoma:"OK",oregon:"OR",pennsylvania:"PA","rhode island":"RI","south carolina":"SC","south dakota":"SD",
+  tennessee:"TN",texas:"TX",utah:"UT",vermont:"VT",virginia:"VA",washington:"WA","west virginia":"WV",wisconsin:"WI",wyoming:"WY" };
+function shortAddr(a) {
+  if (!a) return "";
+  const street = [a.house_number, a.road].filter(Boolean).join(" ");
+  const st = a.state ? (STATES[a.state.toLowerCase()] || a.state) : "";
+  return [street, a.city || a.town || a.village || a.hamlet || a.suburb, st].filter(Boolean).join(", ");
+}
+function placeLabel(name, a, fallback) {
+  const addr = shortAddr(a);
+  if (name && addr) return name + " — " + addr;
+  return addr || name || fallback;
+}
+async function osmLookup(q, near) {
+  await nomGate();
+  const d = 1.5;
+  let url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=1&q=" + encodeURIComponent(q);
+  if (near) url += "&viewbox=" + [near.lon - d, near.lat + d, near.lon + d, near.lat - d].join(",");
+  const res = await fetch(url, { headers: { "Accept": "application/json" } });
+  if (!res.ok) throw new Error("http " + res.status);
+  const data = await res.json();
+  return data.length ? { lat: +data[0].lat, lon: +data[0].lon, label: placeLabel(data[0].name, data[0].address, data[0].display_name) } : null;
+}
+async function photonLookup(q, near) {
+  let url = "https://photon.komoot.io/api/?limit=1&q=" + encodeURIComponent(q);
+  if (near) url += "&lat=" + near.lat + "&lon=" + near.lon;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("http " + res.status);
+  const f = (await res.json()).features?.[0];
+  if (!f) return null;
+  const p = f.properties || {};
+  const label = [[p.housenumber, p.street || p.name].filter(Boolean).join(" "), p.city, p.state, p.postcode].filter(Boolean).join(", ");
+  return { lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], label };
+}
+async function geocode(q, near) {
+  let failures = 0;
+  for (const lookup of [censusLookup, osmLookup, photonLookup]) {
+    try {
+      const r = await lookup(q, near);
+      if (r && isFinite(r.lat) && isFinite(r.lon)) return r;
+    } catch (e) { failures++; }
+  }
+  if (failures === 3) throw new Error("The address lookup services didn't respond. Check your internet connection, then try again.");
+  return null;
+}
+
+// ---------- "any Kroger" / "a gas station": find nearby locations ----------
+const CATS = {
+  "gas station": '["amenity"="fuel"]', "gas": '["amenity"="fuel"]', "fuel station": '["amenity"="fuel"]',
+  "post office": '["amenity"="post_office"]', "pharmacy": '["amenity"="pharmacy"]', "drugstore": '["amenity"="pharmacy"]',
+  "grocery store": '["shop"="supermarket"]', "grocery": '["shop"="supermarket"]', "supermarket": '["shop"="supermarket"]',
+  "bank": '["amenity"="bank"]', "atm": '["amenity"="atm"]', "coffee shop": '["amenity"="cafe"]', "cafe": '["amenity"="cafe"]',
+  "car wash": '["amenity"="car_wash"]', "hardware store": '["shop"="hardware"]', "library": '["amenity"="library"]',
+  "restaurant": '["amenity"="restaurant"]', "fast food": '["amenity"="fast_food"]', "convenience store": '["shop"="convenience"]',
+  "ev charger": '["amenity"="charging_station"]', "charging station": '["amenity"="charging_station"]',
+  "hospital": '["amenity"="hospital"]', "urgent care": '["amenity"="clinic"]', "park": '["leisure"="park"]',
+  "mailbox": '["amenity"="post_box"]', "drop box": '["amenity"="post_box"]', "car repair": '["shop"="car_repair"]',
+  "lunch": '["amenity"~"^(fast_food|restaurant)$"]', "dinner": '["amenity"~"^(fast_food|restaurant)$"]',
+  "breakfast": '["amenity"~"^(fast_food|restaurant|cafe)$"]', "food": '["amenity"~"^(fast_food|restaurant)$"]',
+  "coffee": '["amenity"="cafe"]', "store": "", "station": ""
+};
+// "Shell gas station" → kind of place (fuel) + name (Shell). Either part may be missing.
+function storeQuery(term) {
+  let t = term.toLowerCase().replace(/[’']/g, "").replace(/\s+/g, " ").trim();
+  let cat = null, key = "";
+  for (const k of Object.keys(CATS)) {
+    if (k.length > key.length && new RegExp("(^| )" + k + "(e?s)?( |$)").test(t)) { key = k; cat = CATS[k] || null; }
+  }
+  if (key) t = t.replace(new RegExp("(^| )" + key + "(e?s)?( |$)"), " ");
+  let name = t.replace(/[^\p{L}\p{N}\s&-]/gu, "").trim();
+  if (!name) return { cat, name: null, plain: "" };
+  const plain = plainName(name);
+  // Match "wendys" to "Wendy's" and "chick fil a" to "Chick-fil-A".
+  name = name.replace(/s\b/g, "['’]?s").replace(/[\s-]+/g, "[ -]?");
+  return { cat, name, plain };
+}
+const plainName = t => (t || "").toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+function hav(a, b) {
+  const R = 6371000, rad = x => x * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+async function overpassFind(term, anchors, radius) {
+  const { cat, name } = storeQuery(term);
+  if (!cat && !name) return [];
+  const f = cat || "";
+  const parts = anchors.map(a => {
+    const ar = "(around:" + radius + "," + a.lat.toFixed(5) + "," + a.lon.toFixed(5) + ")";
+    return name ? "nwr" + f + '["brand"~"^' + name + '",i]' + ar + ";nwr" + f + '["name"~"^' + name + '",i]' + ar + ";"
+                : "nwr" + f + ar + ";";
+  }).join("");
+  const q = "[out:json][timeout:25];(" + parts + ");out center 300;";
+  const ask = server => {
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 7000);
+    return fetch(server, {
+      method: "POST", body: "data=" + encodeURIComponent(q), signal: ctl.signal,
+      headers: { "Content-Type": "application/x-www-form-urlencoded" }
+    }).then(res => { if (!res.ok) throw new Error("http"); return res.json(); })
+      .finally(() => clearTimeout(timer));
+  };
+  // Ask both servers at once and use whichever answers first; give up after 7 seconds.
+  const j = await Promise.any(["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"].map(ask));
+  return (j.elements || []).map(e => {
+    const tg = e.tags || {};
+    const nm = tg.name || tg.brand || term;
+    const st = tg["addr:state"] ? (STATES[tg["addr:state"].toLowerCase()] || tg["addr:state"]) : "";
+    const addr = [[tg["addr:housenumber"], tg["addr:street"]].filter(Boolean).join(" "), tg["addr:city"], st].filter(Boolean).join(", ");
+    return {
+      lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon,
+      name: nm, brand: tg.brand || "",
+      label: addr && /\d/.test(addr) ? nm + " — " + addr : nm
+    };
+  }).filter(p => isFinite(p.lat) && isFinite(p.lon));
+}
+async function nominatimFind(term, anchors) {
+  await nomGate();
+  const lats = anchors.map(p => p.lat), lons = anchors.map(p => p.lon), pad = 0.2;
+  const vb = [Math.min(...lons) - pad, Math.max(...lats) + pad, Math.max(...lons) + pad, Math.min(...lats) - pad];
+  const res = await fetch("https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=40&bounded=1&viewbox=" + vb.join(",") + "&q=" + encodeURIComponent(term));
+  if (!res.ok) throw new Error("http");
+  const { cat, name } = storeQuery(term);
+  const nameRe = name ? new RegExp("^" + name, "i") : null;
+  const kind = cat && /\["(\w+)"[=~]"\^?\(?([\w|]+)\)?\$?"\]/.exec(cat);
+  return (await res.json()).filter(d =>
+    (!nameRe || nameRe.test(d.name || "")) &&
+    (!kind || (d.category === kind[1] && kind[2].split("|").includes(d.type)))
+  ).map(d => ({ lat: +d.lat, lon: +d.lon, name: d.name || "", label: placeLabel(d.name, d.address, d.display_name) }));
+}
+async function findBranches(term, anchors, radius, limit) {
+  // Both searches start together; the backup is only used if the main one comes back empty.
+  const main = overpassFind(term, anchors, radius).catch(() => []);
+  const backup = nominatimFind(term, anchors).catch(() => []);
+  let found = await main;
+  if (!found.length) found = await backup;
+  const near = p => Math.min(...anchors.map(a => hav(a, p)));
+  found = found.filter(p => near(p) <= radius * 1.5).sort((a, b) => near(a) - near(b));
+  // "Kroger" should be the Kroger store, not Kroger Pharmacy or Kroger Fuel Center, when the store itself is nearby.
+  const { plain } = storeQuery(term);
+  if (plain) {
+    const exact = found.filter(p => plainName(p.name) === plain);
+    if (exact.length) found = exact;
+  }
+  const out = [];
+  for (const p of found) {
+    if (out.every(q => hav(p, q) > 150)) out.push(p);
+    if (out.length === limit) break;
+  }
+  if (!out.length && term.includes(",")) {
+    // A town or place written like "Cleveland, OH".
+    const g = await geocode(term, anchors[0]).catch(() => null);
+    if (g) out.push(g);
+  }
+  return out;
+}
+
+async function streetAddress(p) {
+  await nomGate();
+  const res = await fetch("https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=" + p.lat + "&lon=" + p.lon);
+  if (!res.ok) return null;
+  return shortAddr((await res.json()).address) || null;
+}
+
+// ---------- Distances ----------
+async function roadMatrix(pts) {
+  const coords = pts.map(p => p.lon.toFixed(6) + "," + p.lat.toFixed(6)).join(";");
+  const res = await fetch("https://router.project-osrm.org/table/v1/driving/" + coords + "?annotations=distance,duration");
+  if (!res.ok) throw new Error("routing");
+  const j = await res.json();
+  if (j.code !== "Ok" || !j.distances) throw new Error("routing");
+  return { dist: j.distances, dur: j.durations };
+}
+// Fallback when the road service is down: straight lines, time guessed at ~30 mph with 30% detour.
+function straightMatrix(pts) {
+  const dist = pts.map(a => pts.map(b => hav(a, b)));
+  return { dist, dur: dist.map(r => r.map(d => d * 1.3 / 13.4)) };
+}
+
+// ---------- Best order ----------
+// Exact search over every order (Held–Karp). Each "group" is one stop; an "any X" stop is a
+// group with several possible locations, and the route visits exactly one per group.
+// With time windows: fewest minutes late first, then earliest finish. Without: least distance.
+// lead[g]: -2 = can go anywhere, -1 = must come first, k = must come right after group k.
+// tail (optional): {d, t} = distance and time from each node to the route's end point.
+function solve(D, T, group, G, win, stay, useTime, lead, tail) {
+  const N = D.length, FULL = 1 << G, S = FULL * N;
+  lead = lead || new Array(G).fill(-2);
+  const follow = new Array(G).fill(-1);
+  let first = -1;
+  lead.forEach((a, g) => { if (a === -1) first = g; else if (a >= 0) follow[a] = g; });
+  const canStart = g => first >= 0 ? g === first : lead[g] === -2;
+  const canGo = (a, g) => follow[a] >= 0 ? g === follow[a] : lead[g] === -2;
+  const late = new Float64Array(S).fill(Infinity), tim = new Float64Array(S), dst = new Float64Array(S);
+  const prv = new Int16Array(S).fill(-1);
+  const better = (l, t, c, idx) => {
+    const L = late[idx];
+    if (l < L - 1e-6) return true;
+    if (l > L + 1e-6) return false;
+    if (useTime) return t < tim[idx] - 1e-6 || (t <= tim[idx] + 1e-6 && c < dst[idx] - 1e-6);
+    return c < dst[idx] - 1e-6;
+  };
+  const step = (from, to, t) => {
+    const dd = T[from][to];
+    if (dd == null || D[from][to] == null) return null;
+    let a = t + dd, la = 0;
+    const w = win[to];
+    if (w) {
+      if (w.open != null && a < w.open) a = w.open;
+      if (w.close != null && a > w.close) la = a - w.close;
+    }
+    return [la, a + stay];
+  };
+  for (let n = 1; n < N; n++) {
+    if (!canStart(group[n])) continue;
+    const s = step(0, n, 0);
+    if (!s) continue;
+    const idx = (1 << group[n]) * N + n;
+    if (better(s[0], s[1], D[0][n], idx)) { late[idx] = s[0]; tim[idx] = s[1]; dst[idx] = D[0][n]; prv[idx] = 0; }
+  }
+  for (let mask = 1; mask < FULL; mask++) {
+    for (let n = 1; n < N; n++) {
+      if (!((mask >> group[n]) & 1)) continue;
+      const idx = mask * N + n;
+      if (late[idx] === Infinity) continue;
+      for (let m = 1; m < N; m++) {
+        const g = group[m];
+        if (((mask >> g) & 1) || !canGo(group[n], g)) continue;
+        const s = step(n, m, tim[idx]);
+        if (!s) continue;
+        const l = late[idx] + s[0], c = dst[idx] + D[n][m], j = (mask | (1 << g)) * N + m;
+        if (better(l, s[1], c, j)) { late[j] = l; tim[j] = s[1]; dst[j] = c; prv[j] = n; }
+      }
+    }
+  }
+  let best = -1, bl = 0, bt = 0, bc = 0;
+  const base = (FULL - 1) * N;
+  const wins = (l, t, c) => l < bl - 1e-6 || (l <= bl + 1e-6 && (useTime ? (t < bt - 1e-6 || (t <= bt + 1e-6 && c < bc - 1e-6)) : c < bc - 1e-6));
+  for (let n = 1; n < N; n++) {
+    const i = base + n;
+    if (late[i] === Infinity) continue;
+    const td = tail ? tail.d[n] : 0, tt = tail ? (tail.t[n] || 0) : 0;
+    if (td == null) continue;
+    const l = late[i], t = tim[i] + tt, c = dst[i] + td;
+    if (best < 0 || wins(l, t, c)) { best = n; bl = l; bt = t; bc = c; }
+  }
+  if (best < 0) throw new Error("No drivable route connects all of these stops.");
+  const order = [];
+  let mask = FULL - 1, n = best;
+  while (n > 0) {
+    order.unshift(n);
+    const p = prv[mask * N + n];
+    mask &= ~(1 << group[n]);
+    n = p;
+  }
+  return order;
+}
+
+// Turn a solved order into the saved route model.
+function buildRoute(start, nodes, order, M, isRoad, dep, stay) {
+  let from = 0;
+  const stops = [], legs = [];
+  for (const i of order) {
+    const nd = nodes[i];
+    stops.push({ input: nd.input, label: nd.label, lat: nd.lat, lon: nd.lon, win: nd.win || null, chain: nd.chain || null, pin: nd.lead != null && nd.lead !== -2, note: nd.note || savedNote(nd.input), done: false });
+    legs.push({ d: M.dist[from][i], t: M.dur ? M.dur[from][i] : null });
+    from = i;
+  }
+  const r = { v: 1, start: { lat: start.lat, lon: start.lon, label: start.label || "" }, stops, legs, dep, stay, isRoad, doneBefore: 0 };
+  r.plan = schedule(r).map(x => x.arrive);
+  return r;
+}
+
+// Notes are remembered by address, so a regular customer's gate code shows up next time too.
+function noteBook() { try { return JSON.parse(store.get("notes") || "{}"); } catch (e) { return {}; } }
+const noteKey = t => (t || "").toLowerCase().replace(/@.*$/, "").replace(/\s+/g, " ").trim();
+function savedNote(input) { return noteBook()[noteKey(input)] || ""; }
+function rememberNote(input, note) {
+  const b = noteBook(), k = noteKey(input);
+  if (note) b[k] = note; else delete b[k];
+  store.set("notes", JSON.stringify(b));
+}
+
+async function optimize(start, items, dep, stay, end) {
+  // items: [{input, label, lat, lon, win, chain, candidates?}]
+  const nodes = [start], group = [-1];
+  items.forEach((it, g) => {
+    for (const c of (it.candidates || [it])) {
+      nodes.push({ ...it, lat: c.lat, lon: c.lon, label: c.label });
+      group.push(g);
+    }
+  });
+  setStatus("Finding the shortest route…");
+  const pts = end ? [...nodes, end] : nodes, E = nodes.length;
+  let M, isRoad = true;
+  try { M = await roadMatrix(pts); } catch (err) { M = straightMatrix(pts); isRoad = false; }
+  if (!M.dur) M.dur = straightMatrix(pts).dur;
+  let D = M.dist, T = M.dur, tail = null;
+  if (end) {
+    tail = { d: M.dist.map(r => r[E]), t: M.dur.map(r => r[E]) };
+    D = M.dist.slice(0, E).map(r => r.slice(0, E));
+    T = M.dur.slice(0, E).map(r => r.slice(0, E));
+  }
+  const win = nodes.map(nd => winSecs(nd.win, dep));
+  const useTime = items.some(it => it.win);
+  const lead = items.map(it => it.lead == null ? -2 : it.lead);
+  const order = solve(D, T, group, items.length, win, stay * 60, useTime, lead, tail);
+  const r = buildRoute(start, nodes, order, M, isRoad, dep, stay);
+  if (end) {
+    const last = order[order.length - 1];
+    r.end = { lat: end.lat, lon: end.lon, label: end.label || "", home: !!end.home, d: M.dist[last][E], t: M.dur[last][E] };
+  }
+  return r;
+}
+
+// ---------- Formatting ----------
+const miles = m => (m / 1609.344).toFixed(m < 16093 ? 1 : 0) + " mi";
+function hm(s) {
+  const m = Math.round(s / 60);
+  return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + (m % 60) + " min";
+}
+// Arrival times (as clock times). Once you're under way they're live: check-offs set the clock,
+// and the next stop can't be reached before now plus the drive, so times slide if you fall behind.
+function schedule(r, live) {
+  const stay = (r.stay || 0) * 1000 * 60, now = Date.now();
+  const lastDone = r.stops.reduce((k, s, i) => s.done ? i : k, -1);
+  let clock = r.dep, first = true;
+  return r.stops.map((s, i) => {
+    const leg = (r.legs[i].t || 0) * 1000;
+    const skipped = !s.done && i < lastDone;
+    let arrive = clock + leg, wait = 0;
+    if (live && !s.done && !skipped && first) {
+      first = false;
+      if (now > r.dep) arrive = Math.max(arrive, now + Math.min(leg, 120000));
+    }
+    const w = winSecs(s.win, r.dep);
+    const open = w && w.open != null ? r.dep + w.open * 1000 : null, close = w && w.close != null ? r.dep + w.close * 1000 : null;
+    if (open != null && arrive < open) { wait = (open - arrive) / 1000; arrive = open; }
+    const late = !s.done && !skipped && close != null && arrive > close + 30000;
+    if (s.done && live && s.doneAt) clock = s.doneAt;
+    else if (!skipped) clock = arrive + stay;
+    const planned = r.plan && r.plan[i] != null ? r.plan[i] : arrive;
+    return { arrive, wait, late, skipped, behind: (arrive - planned) / 60000 };
+  });
+}
+
+// ---------- Rendering ----------
+let route = null;
+function saveRoute() { store.set("route", JSON.stringify(route)); try { logFromRoute(); } catch (e) {} }
+function setRoute(r, save) {
+  if (!r.day) r.day = selDay;
+  if (!r.plan || r.plan.length !== r.stops.length) r.plan = schedule({ ...r, plan: null }).map(x => x.arrive);
+  route = r; if (save !== false) saveRoute(); render();
+}
+
+function renderTotals() {
+  const dist = route.legs.reduce((a, l) => a + (l.d || 0), 0) + (route.end ? route.end.d || 0 : 0);
+  const time = route.legs.reduce((a, l) => a + (l.t || 0), 0) + (route.end ? route.end.t || 0 : 0);
+  $("tDist").textContent = miles(dist);
+  $("tTime").textContent = hm(time);
+  const sch = schedule(route, true);
+  $("tEnd").textContent = sch.length ? fmtClock(new Date(sch[sch.length - 1].arrive)) : "–";
+  const mpg = parseFloat($("mpg").value), price = parseFloat($("price").value);
+  const show = mpg > 0 && price >= 0 && $("price").value !== "";
+  $("costBox").hidden = !show;
+  if (show) $("tCost").textContent = "$" + (dist / 1609.344 / mpg * price).toFixed(2);
+}
+
+let editingNote = -1;
+function render() {
+  renderList(); renderRest();
+  updateAddUI();
+}
+function renderList() {
+  const r = route, list = $("list"), sch = schedule(r, true);
+  list.replaceChildren();
+  const addRow = (cells, cls) => {
+    const li = document.createElement("li");
+    if (cls) li.className = cls;
+    li.append(...cells);
+    list.append(li);
+    return li;
+  };
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  const startAddr = el("span", "addr");
+  startAddr.append(el("span", null, r.start.label || "Your location"));
+  startAddr.append(el("small", "eta", "Leave " + fmtClock(new Date(r.dep))));
+  addRow([el("span"), el("span", "n", "●"), startAddr, el("span", "leg", "start")]);
+
+  r.stops.forEach((s, i) => {
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = !!s.done; cb.dataset.i = i;
+    cb.setAttribute("aria-label", "Mark stop " + (i + 1) + " done");
+    const addr = el("span", "addr");
+    addr.append(el("span", null, s.input));
+    if (s.label && s.label !== s.input) addr.append(el("small", null, (s.chain ? "Picked: " : "") + s.label));
+    const x = sch[i];
+    let eta;
+    if (s.done) eta = s.doneAt ? "Done " + fmtClock(new Date(s.doneAt)) : "Done";
+    else if (x.skipped) eta = "Skipped";
+    else {
+      eta = "Arrive " + fmtClock(new Date(x.arrive));
+      if (x.wait >= 60) eta += " · wait " + hm(x.wait);
+      if (s.win) eta += " · " + winText(s.win);
+      if (x.late) eta += " · late";
+    }
+    addr.append(el("small", "eta" + (x.late ? " late" : ""), eta));
+
+    if (editingNote === i) {
+      const box = el("div", "noteedit");
+      const ta = el("textarea");
+      ta.value = s.note || ""; ta.placeholder = "Gate code, contact, phone number, which door…";
+      ta.setAttribute("aria-label", "Note for stop " + (i + 1));
+      const row = el("div", "acts");
+      const save = el("button", "mini", "Save note"); save.type = "button"; save.dataset.act = "savenote"; save.dataset.i = i;
+      const cancel = el("button", "mini", "Cancel"); cancel.type = "button"; cancel.dataset.act = "cancelnote";
+      row.append(save, cancel);
+      box.append(ta, row);
+      addr.append(box);
+      setTimeout(() => ta.focus(), 0);
+    } else {
+      if (s.note) addr.append(el("small", "stopnote", s.note));
+      if (!s.done) {
+        const acts = el("div", "acts");
+        const nb = el("button", "mini", s.note ? "Edit note" : "Add note"); nb.type = "button"; nb.dataset.act = "note"; nb.dataset.i = i;
+        acts.append(nb);
+        if (!x.skipped) {
+          const a = el("a", "mini", "Text ETA");
+          a.href = etaText(s, x);
+          acts.append(a);
+        }
+        addr.append(acts);
+      }
+    }
+    const nb = el("button", "n pinbtn", String(i + 1));
+    nb.type = "button"; nb.dataset.pin = i + 1; nb.setAttribute("aria-label", "Show stop " + (i + 1) + " on the map");
+    addRow([cb, nb, addr, el("span", "leg", "+" + miles(r.legs[i].d))], s.done ? "done" : "");
+  });
+  if (r.end) {
+    const endAddr = el("span", "addr");
+    endAddr.append(el("span", null, r.end.home ? "Back to start" : "End · " + r.end.label));
+    const lastX = sch[sch.length - 1];
+    if (lastX) endAddr.append(el("small", "eta", "Get there about " + fmtClock(new Date(lastX.arrive + (r.stay || 0) * 60000 + (r.end.t || 0) * 1000))));
+    addRow([el("span"), el("span", "n", "⌂"), endAddr, el("span", "leg", "+" + miles(r.end.d || 0))]);
+  }
+
+  // How you're doing against the plan, judged at the next stop.
+  const next = sch.find((x, i) => !r.stops[i].done && !x.skipped);
+  const pace = $("paceNote");
+  const started = Date.now() > r.dep && r.stops.some(s => s.done);
+  if (next && started && Math.abs(next.behind) >= 5) {
+    const m = Math.round(Math.abs(next.behind));
+    pace.textContent = next.behind > 0 ? "Running about " + hm(m * 60) + " behind plan. Arrival times below are updated." : "About " + hm(m * 60) + " ahead of plan.";
+    pace.className = "pace" + (next.behind > 0 ? " behind" : "");
+    pace.hidden = false;
+  } else pace.hidden = true;
+  renderTotals();
+}
+
+// A text message with the updated arrival time, ready to send. Uses a phone number from the stop's note if there is one.
+function etaText(s, x) {
+  const when = fmtClock(new Date(x.arrive));
+  const body = x.behind >= 5
+    ? "Hi, I'm running about " + hm(Math.round(x.behind) * 60) + " behind. I should arrive around " + when + "."
+    : "Hi, I'm on my way and should arrive around " + when + ".";
+  const ph = /(\+?1[\s.-]?)?\(?(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})/.exec(s.note || "");
+  return "sms:" + (ph ? ph[2] + ph[3] + ph[4] : "") + "?&body=" + encodeURIComponent(body);
+}
+
+function renderRest() {
+  const r = route, sch = schedule(r);
+  $("doneNote").hidden = !r.doneBefore;
+  $("doneNote").textContent = r.doneBefore ? r.doneBefore + (r.doneBefore === 1 ? " stop" : " stops") + " already done before this re-plan." : "";
+
+  renderLinks();
+  const notes = [];
+  notes.push(r.isRoad ? "Order is based on real road driving." : "The road routing service didn't respond, so this order uses straight-line distance. It may not be the shortest drive.");
+  if (r.stops.some(s => s.win)) notes.push("With time windows, the order puts on-time arrival first, then the earliest finish.");
+  if (r.stops.some(s => s.pin)) notes.push("Quick stops like gas or food stay right after the stop above them, at the location with the least detour.");
+  if (r.stops.some(s => s.chain && !s.pin)) notes.push("For “any” stops, the location that adds the least to the whole trip was picked.");
+  $("note").textContent = notes.join(" ");
+  const lateN = sch.filter(x => x.late).length;
+  $("warnNote").hidden = !lateN;
+  $("warnNote").textContent = lateN ? "No order gets to every stop on time. " + lateN + (lateN === 1 ? " stop is" : " stops are") + " marked late; this order keeps the lateness as small as possible." : "";
+  $("result").hidden = !!(route.day && route.day !== selDay);
+  shareUrl = "";
+  $("shareBox").hidden = true;
+  prepareShare();
+  drawMap();
+}
+
+// Google Maps links: phones allow 3 waypoints per link, computers 9, so long routes are split into parts.
+const isPhone = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+function renderLinks() {
+  const wrap = $("links");
+  wrap.replaceChildren();
+  $("linkNote").hidden = true;
+  const rem = route.stops.filter(s => !s.done);
+  if (!rem.length) return;
+  // Google Maps takes a limited number of stops per link (fewer on phones), so the button
+  // opens as many of your next stops as it can; check those off and it moves on to the rest.
+  const per = isPhone ? 4 : 10;
+  const go = rem.slice(0, per);
+  const anyDone = route.stops.some(s => s.done);
+  const enc = p => p.lat.toFixed(6) + "," + p.lon.toFixed(6);
+  const toEnd = route.end && rem.length < per;
+  let url = "https://www.google.com/maps/dir/?api=1&travelmode=driving" +
+    (anyDone ? "" : "&origin=" + enc(route.start)) + "&destination=" + enc(toEnd ? route.end : go[go.length - 1]);
+  const wp = (toEnd ? go : go.slice(0, -1)).map(enc);
+  if (wp.length) url += "&waypoints=" + encodeURIComponent(wp.join("|"));
+  const a = document.createElement("a");
+  a.className = "btn"; a.href = url; a.target = "_blank"; a.rel = "noopener";
+  a.textContent = "Open route in Google Maps";
+  wrap.append(a);
+  if (rem.length > per) {
+    $("linkNote").textContent = "Google Maps opens your next " + per + " stops. Check them off as you go, then tap the button again for the rest.";
+    $("linkNote").hidden = false;
+  }
+}
+
+// Map: numbered pins plus the actual driving path (straight lines if the road service is down).
+let map, layer, pathCache = { key: "", path: null, legs: null }, markers = [];
+
+// The card that opens when you tap a pin: what the stop is, when you'll get there, and the job notes.
+function pinCard(i) {
+  const r = route, el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const card = el("div", "pincard");
+  if (!i) {
+    card.append(el("b", null, "Start"), el("small", null, r.start.label || "Your location"), el("span", "eta", "Leave " + fmtClock(new Date(r.dep))));
+    return card;
+  }
+  const s = r.stops[i - 1], x = schedule(r, true)[i - 1];
+  card.append(el("b", null, i + " · " + s.input.replace(/\s*@.*$/, "")));
+  if (s.label && s.label !== s.input) card.append(el("small", null, s.label));
+  let eta = s.done ? (s.doneAt ? "Done " + fmtClock(new Date(s.doneAt)) : "Done") : x.skipped ? "Skipped" : "Arrive " + fmtClock(new Date(x.arrive));
+  if (!s.done && s.win) eta += " · " + winText(s.win);
+  if (!s.done && x.late) eta += " · late";
+  card.append(el("span", "eta" + (x.late && !s.done ? " late" : ""), eta));
+  if (s.note) card.append(el("p", "pnote", s.note));
+  else card.append(el("p", "pnote empty", "No job notes yet. Add them from the stop list."));
+  const acts = el("div", "acts");
+  const dir = el("a", "mini", "Directions");
+  dir.href = "https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=" + s.lat.toFixed(6) + "," + s.lon.toFixed(6);
+  dir.target = "_blank"; dir.rel = "noopener";
+  acts.append(dir);
+  if (!s.done && !x.skipped) { const t = el("a", "mini", "Text ETA"); t.href = etaText(s, x); acts.append(t); }
+  const done = el("button", "mini", s.done ? "Undo done" : "Mark done");
+  done.type = "button";
+  done.addEventListener("click", () => {
+    s.done = !s.done;
+    if (s.done) s.doneAt = Date.now(); else { delete s.doneAt; unlogStop(s); }
+    editingNote = -1; saveRoute(); render();
+  });
+  acts.append(done);
+  card.append(acts);
+  return card;
+}
+// Tapping a number in the stop list shows that stop on the map.
+const CARD_OPTS = { maxWidth: 280, minWidth: 220, autoPan: true, autoPanPaddingTopLeft: [20, 40], autoPanPaddingBottomRight: [20, 20], offset: [0, -10] };
+function pinLatLng(i) { const p = i ? route.stops[i - 1] : route.start; return L.latLng(p.lat, p.lon); }
+function openCard(i) { L.popup(CARD_OPTS).setLatLng(pinLatLng(i)).setContent(pinCard(i)).openOn(map); }
+function focusPin(i) {
+  if (!map || !route || i > route.stops.length) return;
+  $("map").scrollIntoView({ behavior: "smooth", block: "center" });
+  // Zoom close enough that the stop has its own pin, and put it low in the map so its card has room above it.
+  map.setView(pinLatLng(i), Math.max(map.getZoom(), 15), { animate: false });
+  map.panBy([0, -Math.round($("map").clientHeight * 0.3)], { animate: false });
+  openCard(i);
+}
+
+// ---------- Pins that would sit on top of each other are grouped into one badge ----------
+let pinLayer, pinData = [];
+const GROUP_PX = 30;
+function groupLabel(nums) {
+  // 1,2,3,4 → "1–4"; 2,5,7 → "2 · 5 · 7"; long mixes → "6 stops"
+  const run = nums.every((n, k) => !k || n === nums[k - 1] + 1);
+  if (run && nums.length > 2) return nums[0] + "–" + nums[nums.length - 1];
+  const txt = nums.join(" · ");
+  return txt.length <= 11 ? txt : nums.length + " stops";
+}
+function layoutPins() {
+  if (!map || !pinLayer) return;
+  pinLayer.clearLayers();
+  markers = [];
+  const groups = [];
+  for (const d of pinData) {
+    const pt = map.latLngToLayerPoint(d.ll);
+    const g = groups.find(g => g.pt.distanceTo(pt) < GROUP_PX);
+    if (g) g.items.push(d); else groups.push({ pt, items: [d] });
+  }
+  for (const g of groups) {
+    if (g.items.length === 1) {
+      const d = g.items[0];
+      const icon = L.divIcon({ className: "", html: '<div class="pin ' + d.cls + '">' + (d.i || "●") + "</div>",
+        iconSize: [26, 26], iconAnchor: d.quick ? [2, 30] : [13, 13] });
+      const mk = L.marker(d.ll, { icon, zIndexOffset: (d.quick ? 1000 : 0) + d.i, title: d.title, keyboard: true }).addTo(pinLayer);
+      mk.on("click", () => openCard(d.i));
+      markers[d.i] = mk;
+      continue;
+    }
+    const nums = g.items.map(d => d.i).sort((a, b) => a - b);
+    const label = groupLabel(nums.map(n => n || "●"));
+    const w = Math.max(34, 16 + label.length * 7.5);
+    const icon = L.divIcon({ className: "", html: '<div class="pin group" style="width:' + w + 'px">' + label + "</div>",
+      iconSize: [w, 28], iconAnchor: [w / 2, 14] });
+    const center = map.layerPointToLatLng(g.pt);
+    const mk = L.marker(center, { icon, zIndexOffset: 2000, title: "Stops " + nums.join(", ") + ". Tap to choose one.", keyboard: true }).addTo(pinLayer);
+    mk.on("click", () => L.popup({ ...CARD_OPTS, minWidth: 230 }).setLatLng(center).setContent(groupCard(nums, g.items.map(d => d.ll))).openOn(map));
+  }
+}
+// The list that opens from a group badge: tap a stop to see its card.
+function groupCard(nums, lls) {
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const card = el("div", "pincard");
+  card.append(el("b", null, nums.length + " stops close together"));
+  const list = el("div", "grouplist"), sch = schedule(route, true);
+  for (const i of nums) {
+    const b = el("button", "grouprow"); b.type = "button";
+    const s = i ? route.stops[i - 1] : null;
+    const n = el("span", "pin " + (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (s && s.chain ? " quick" : ""), i ? String(i) : "●");
+    const txt = el("span", "gtext");
+    txt.append(el("span", null, i ? s.input.replace(/\s*@.*$/, "") : (route.start.label || "Start")));
+    txt.append(el("small", null, !i ? "Start" : s.done ? "Done" : sch[i - 1].skipped ? "Skipped" : "Arrive " + fmtClock(new Date(sch[i - 1].arrive))));
+    b.append(n, txt);
+    b.addEventListener("click", () => openCard(i));
+    list.append(b);
+  }
+  card.append(list);
+  const z = el("button", "mini", "Zoom in to separate them"); z.type = "button";
+  z.addEventListener("click", () => { map.closePopup(); map.fitBounds(L.latLngBounds(lls), { padding: [60, 60], maxZoom: 18 }); });
+  const acts = el("div", "acts"); acts.append(z); card.append(acts);
+  return card;
+}
+async function drawMap() {
+  if (!window.L) { $("map").hidden = true; return; }
+  if (!map) {
+    map = L.map("map", { scrollWheelZoom: false });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+    }).addTo(map);
+    layer = L.layerGroup().addTo(map);
+    pinLayer = L.layerGroup().addTo(map);
+    map.on("zoomend", layoutPins);
+  }
+  map.invalidateSize();
+  layer.clearLayers();
+  const r = route, sch = schedule(r, true);
+  const all = [r.start, ...r.stops];
+  const ll = all.map(p => [p.lat, p.lon]);
+  pinData = all.map((p, i) => {
+    const s = i ? r.stops[i - 1] : null;
+    const quick = !!(s && s.chain);
+    if (quick) L.circleMarker([p.lat, p.lon], { radius: 4, color: "#fff", weight: 2, fillColor: "#d97706", fillOpacity: 1 }).addTo(layer);
+    return { i, ll: L.latLng(p.lat, p.lon), quick, title: i ? (i + ". " + (s.label || s.input)) : "Start",
+      cls: (!i ? "start" : s.done ? "done" : sch[i - 1].late ? "late" : "") + (quick ? " quick" : "") };
+  });
+  // The route's end point, when it isn't the last stop.
+  const llx = r.end ? ll.concat([[r.end.lat, r.end.lon]]) : ll;
+  if (r.end && !r.end.home) L.marker([r.end.lat, r.end.lon], { title: "End: " + r.end.label, icon: L.divIcon({ className: "", html: '<div class="pin endpin">⌂</div>', iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(layer);
+  map.fitBounds(llx, { padding: [30, 30], maxZoom: 15, animate: false });
+  layoutPins();
+
+  const key = llx.map(p => p.join(",")).join(";");
+  let path = pathCache.key === key ? pathCache.path : null;
+  let legs = pathCache.key === key ? pathCache.legs : null;
+  if (!path) {
+    try {
+      const coords = llx.map(p => p[1].toFixed(6) + "," + p[0].toFixed(6)).join(";");
+      const res = await fetch("https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson&steps=true");
+      const j = await res.json();
+      if (j.code === "Ok" && j.routes[0]) { path = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); legs = j.routes[0].legs; }
+    } catch (e) {}
+    if (path) pathCache = { key, path, legs };
+  }
+  if (route !== r) return;
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#0b7a5a";
+  L.polyline(path || llx, { color, weight: 5, opacity: 0.85, dashArray: path ? null : "6 8" }).addTo(layer);
+  renderDirections(r, legs);
+}
+
+// ---------- Turn-by-turn directions ----------
+const ORD = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th"];
+const COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+function stepText(st, toName, fromName) {
+  const m = st.maneuver, mod = m.modifier || "", road = st.name || st.ref || "";
+  const onto = road ? " onto " + road : "";
+  const side = mod.includes("left") ? "left" : mod.includes("right") ? "right" : "";
+  switch (m.type) {
+    case "depart": return (fromName ? "Leave " + fromName + " and head " : "Head ") + COMPASS[Math.round((m.bearing_after || 0) / 45) % 8] + (road ? " on " + road : "");
+    case "arrive": return "Arrive at " + toName + (side ? ", on the " + side : "");
+    case "turn": return mod === "uturn" ? "Make a U-turn" + onto : mod === "straight" ? "Go straight" + onto : "Turn " + mod + onto;
+    case "new name": return "Continue" + onto;
+    case "continue": return mod === "uturn" ? "Make a U-turn" + onto : "Continue " + (mod && mod !== "straight" ? mod : "straight") + (road ? " on " + road : "");
+    case "merge": return "Merge" + (side ? " " + side : "") + onto;
+    case "on ramp": return "Take the ramp" + (side ? " on the " + side : "") + onto;
+    case "off ramp": return "Take the exit" + (side ? " on the " + side : "") + onto;
+    case "fork": return "Keep " + (side || "straight") + " at the fork" + onto;
+    case "end of road": return "At the end of the road, turn " + (side || mod) + onto;
+    case "roundabout": case "rotary": return "At the roundabout, take the " + (ORD[m.exit] || "next") + " exit" + onto;
+    case "roundabout turn": return "At the roundabout, turn " + mod + onto;
+    case "exit roundabout": case "exit rotary": return "Exit the roundabout" + onto;
+    default: return "Continue" + (road ? " on " + road : "");
+  }
+}
+function stepArrow(st) {
+  const t = st.maneuver.type, mod = st.maneuver.modifier || "";
+  if (t === "depart") return "●";
+  if (t === "arrive") return "⚑";
+  if (/roundabout|rotary/.test(t)) return "↻";
+  if (mod === "uturn") return "↶";
+  if (mod === "left" || mod === "sharp left") return "←";
+  if (mod === "right" || mod === "sharp right") return "→";
+  if (mod === "slight left") return "↖";
+  if (mod === "slight right") return "↗";
+  return "↑";
+}
+function shortDist(m) {
+  const mi = m / 1609.344;
+  return mi < 0.1 ? Math.round(m * 3.28084 / 10) * 10 + " ft" : mi.toFixed(mi < 10 ? 1 : 0) + " mi";
+}
+let turnMarker = null;
+function renderDirections(r, legs) {
+  const wrap = $("dirWrap"), ol = $("steps");
+  ol.replaceChildren();
+  turnMarker = null;
+  if (!legs || legs.length !== r.stops.length + (r.end ? 1 : 0)) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const name = i => i ? route.stops[i - 1].input.replace(/\s*@.*$/, "") : (r.start.label || "your start");
+  let turns = 0;
+  legs.forEach((leg, k) => {
+    const s = r.stops[k], isEnd = !s;
+    const endName = r.end ? (r.end.home ? "your start" : r.end.label) : "";
+    const head = el("li", "legHead" + (s && s.done ? " done" : ""));
+    head.append(el("span", "n", isEnd ? "⌂" : String(k + 1)), el("span", "addr", isEnd ? (r.end.home ? "Back to start" : "To " + endName) : "To " + name(k + 1) + (s.done ? " (done)" : "")), el("span", "leg", shortDist(leg.distance)));
+    ol.append(head);
+    leg.steps.forEach(st => {
+      if (st.maneuver.type === "notification") return;
+      turns++;
+      const li = el("li");
+      li.tabIndex = 0;
+      const a = el("span", "arrow", stepArrow(st)); a.setAttribute("aria-hidden", "true");
+      li.append(a, el("span", "addr", stepText(st, isEnd ? endName : "stop " + (k + 1), k ? "stop " + k : "")), el("span", "leg", st.distance > 0 ? shortDist(st.distance) : ""));
+      const [lon, lat] = st.maneuver.location;
+      const go = () => {
+        ol.querySelectorAll("li.active").forEach(x => x.classList.remove("active"));
+        li.classList.add("active");
+        if (!map) return;
+        if (turnMarker) turnMarker.remove();
+        turnMarker = L.marker([lat, lon], { interactive: false, icon: L.divIcon({ className: "", html: '<div class="turnDot"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }) }).addTo(layer);
+        map.closePopup();
+        $("map").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+        map.setView([lat, lon], 17);
+      };
+      li.addEventListener("click", go);
+      li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+      ol.append(li);
+    });
+  });
+  $("dirSum").textContent = "Turn-by-turn directions · " + turns + " steps";
+}
+
+// ---------- Check off stops ----------
+$("list").addEventListener("change", e => {
+  const cb = e.target;
+  if (!cb.matches("input[type=checkbox]")) return;
+  const i = +cb.dataset.i;
+  route.stops[i].done = cb.checked;
+  if (cb.checked) route.stops[i].doneAt = Date.now(); else { delete route.stops[i].doneAt; unlogStop(route.stops[i]); }
+  editingNote = -1;
+  saveRoute();
+  render();
+  const again = $("list").querySelector('input[data-i="' + i + '"]');
+  if (again) again.focus();
+});
+
+// ---------- Stop notes ----------
+$("list").addEventListener("click", e => {
+  const pb = e.target.closest("button[data-pin]");
+  if (pb) return focusPin(+pb.dataset.pin);
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const act = b.dataset.act, i = +b.dataset.i;
+  if (act === "note") { editingNote = i; renderList(); }
+  else if (act === "cancelnote") { editingNote = -1; renderList(); }
+  else if (act === "savenote") {
+    const ta = b.closest(".noteedit").querySelector("textarea");
+    const note = ta.value.trim().slice(0, 300);
+    route.stops[i].note = note;
+    rememberNote(route.stops[i].input, note);
+    editingNote = -1;
+    saveRoute();
+    renderList();
+    prepareShare();
+  }
+});
+// Arrival times keep up with the clock (skipped while a note is being typed).
+setInterval(() => { if (route && editingNote < 0 && !$("result").hidden) renderList(); }, 60000);
+
+// Picked stores show their street address, so you can see exactly where you're going.
+async function fillStoreAddresses(r) {
+  for (const s of r.stops) {
+    if (!s.chain || s.done || /\d/.test(s.label)) continue;
+    setStatus("Getting the address of " + s.label + "…");
+    const addr = await streetAddress(s).catch(() => null);
+    if (addr) s.label = s.label.split(",")[0] + " — " + addr;
+  }
+}
+
+// ---------- Re-plan what's left from where you are now ----------
+$("replan").addEventListener("click", () => replanRoute(null));
+async function replanRoute(extra) {
+  if (!route) return;
+  const rem = route.stops.filter(s => !s.done);
+  if (!rem.length && !extra) return setStatus("Every stop is checked off. Nice work.");
+  const buttons = [btn, $("replan"), $("share"), $("addBtn")];
+  buttons.forEach(b => b.disabled = true);
+  try {
+    if (extra) await resolveExtra(extra, rem);
+    setStatus("Getting your location…");
+    let start, from = "where you are.";
+    try {
+      start = { ...(await getLocation()), label: "Your location" };
+    } catch (err) {
+      let last = null;
+      route.stops.forEach(s => { if (s.done) last = s; });
+      const p = last || route.start;
+      start = { lat: p.lat, lon: p.lon, label: last ? (last.label || last.input) : route.start.label };
+      from = last ? "your last finished stop." : "your starting point.";
+      setStatus("Couldn't get your location, so re-planning from " + from.replace(".", "…"));
+      await sleep(800);
+    }
+    const doneNow = route.stops.length - rem.length;
+    // Quick stops keep their place right after the stop above them; if that one is done, they come first.
+    let firstTaken = false;
+    const items = rem.map(s => {
+      const i = route.stops.indexOf(s);
+      let lead = -2;
+      if (s.pin) {
+        const prev = route.stops[i - 1];
+        if (prev && !prev.done) lead = rem.indexOf(prev);
+        else if (!firstTaken) { lead = -1; firstTaken = true; }
+      }
+      return { ...s, candidates: null, lead };
+    });
+    if (extra) items.push({ ...extra, lead: -2 });
+    const next = await optimize(start, items, Date.now(), route.stay || 0, route.end || null);
+    next.doneBefore = (route.doneBefore || 0) + doneNow;
+    next.day = route.day || todayKey();
+    await fillStoreAddresses(next);
+    editingNote = -1;
+    setRoute(next);
+    const where = from;
+    if (extra) {
+      const n = next.stops.findIndex(s => s.input === extra.input) + 1;
+      setStatus("Added “" + extra.input + "” as stop " + n + " and re-planned from " + where);
+      $("addStop").value = "";
+    } else {
+      setStatus("Re-planned " + rem.length + (rem.length === 1 ? " stop" : " stops") + " from " + where);
+    }
+  } catch (err) {
+    setStatus(err.message || "Something went wrong. Try again.", true);
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+// ---------- Add a stop at any time of day ----------
+function updateAddUI() {
+  const live = route && (route.day || todayKey()) === selDay;
+  $("addBtn").textContent = live ? (selDay === todayKey() ? "Add stop to today's route" : "Add stop to this route") : (selDay === todayKey() ? "Add to today's stops" : "Add to this day's stops");
+  $("addHint").textContent = live
+    ? "Gas or food goes in as your next stop, at the location with the least detour. A new address goes wherever it adds the fewest miles. The rest of your route stays in the same order."
+    : "It joins your stops above.";
+}
+function closeAdd() { $("addPanel").hidden = true; $("addOpen").hidden = false; $("addStop").value = ""; }
+$("addOpen").addEventListener("click", () => {
+  updateAddUI();
+  $("addOpen").hidden = true; $("addPanel").hidden = false; $("addStop").focus();
+});
+$("addCancel").addEventListener("click", closeAdd);
+updateAddUI();
+
+// Where you are now: your location if the browser shares it, otherwise your last finished stop.
+async function whereNow() {
+  try { return { ...(await getLocation()), label: "Your location", live: true }; }
+  catch (e) {
+    let last = null;
+    route.stops.forEach(s => { if (s.done) last = s; });
+    const p = last || route.start;
+    return { lat: p.lat, lon: p.lon, label: last ? (last.label || last.input) : (route.start.label || "your start"), live: false };
+  }
+}
+
+// A pit stop slips into today's route; every other stop keeps its place and its check-off.
+async function addToRoute(it) {
+  const r = route, n = r.stops.length;
+  const firstOpen = r.stops.findIndex(s => !s.done);
+  const base = firstOpen < 0 ? n : firstOpen;
+  const buttons = [btn, $("replan"), $("share"), $("addBtn")];
+  buttons.forEach(b => b.disabled = true);
+  try {
+    setStatus("Getting your location…");
+    const here = await whereNow();
+    const nextStop = r.stops[base] || null;
+    setStatus("Looking up “" + (it.chain || it.text) + "”…");
+    if (it.chain) {
+      it.candidates = await findBranches(it.chain, nextStop ? [here, nextStop] : [here], 16000, 8);
+      if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near you or your next stop. Try a different name, or type a specific address.");
+    } else {
+      const g = it.pick || await geocode(it.text, here);
+      if (!g) throw new Error("Couldn't find “" + it.text + "”. Check the spelling and add a city and state, then try again.");
+      Object.assign(it, g);
+    }
+    const cands = it.candidates || [{ lat: it.lat, lon: it.lon, label: it.label }];
+    // Points: 0 = start, 1..n = stops, n+1 = where you are, then each possible location.
+    const pts = [r.start, ...r.stops, here, ...cands, ...(r.end ? [r.end] : [])];
+    const H = n + 1, C0 = n + 2, E = r.end ? C0 + cands.length : null;
+    setStatus("Fitting it into your route…");
+    let M;
+    try { M = await roadMatrix(pts); } catch (e) { M = straightMatrix(pts); }
+    if (!M.dur) M.dur = straightMatrix(pts).dur;
+    // Gas or food goes next. A new address can go in any open spot; pick the one that adds the fewest miles.
+    const slots = it.chain ? [base] : Array.from({ length: n - base + 1 }, (_, j) => base + j);
+    let best = null;
+    cands.forEach((c, j) => {
+      const ci = C0 + j;
+      for (const k of slots) {
+        const prev = k === base ? H : k, next = k < n ? k + 1 : E;
+        const a = M.dist[prev][ci], b = next != null ? M.dist[ci][next] : 0, old = next != null ? M.dist[prev][next] : 0;
+        if (a == null || b == null || old == null) continue;
+        const extra = a + b - old;
+        if (!best || extra < best.extra) best = { extra, k, ci, c, prev, next };
+      }
+    });
+    if (!best) throw new Error("Couldn't find a drivable way to fit that stop into your route.");
+    const k = best.k;
+    const stop = { input: it.input, label: best.c.label || it.label || it.input, lat: best.c.lat, lon: best.c.lon,
+      win: it.win || null, chain: it.chain || null, pin: false, note: it.note || "", done: false };
+    r.stops.splice(k, 0, stop);
+    r.legs.splice(k, 0, { d: M.dist[best.prev][best.ci], t: M.dur[best.prev][best.ci] });
+    if (best.next != null && best.next === E) { r.end.d = M.dist[best.ci][E]; r.end.t = M.dur[best.ci][E]; }
+    else if (best.next != null) r.legs[k + 1] = { d: M.dist[best.ci][best.next], t: M.dur[best.ci][best.next] };
+    r.plan = null;
+    await fillStoreAddresses({ stops: [stop] });
+    editingNote = -1;
+    setRoute(r);
+    closeAdd();
+    if (r.day === selDay && !lines().some(l => pickKey(l) === pickKey(it.input))) {
+      const empty = rows.find(x => !x.stop.value.trim());
+      if (empty) { empty.stop.value = it.text || it.input; empty.time.value = ""; syncFromRows(); }
+    }
+    const extraMi = Math.max(0, best.extra);
+    setStatus("Added “" + it.input + "” as stop " + (k + 1) + (k === base ? ", your next stop" : "") + ". It adds about " + miles(extraMi) + " to your day.");
+  } catch (err) {
+    setStatus(err.message || "Something went wrong. Try again.", true);
+  } finally {
+    buttons.forEach(b => b.disabled = false);
+  }
+}
+
+// ---------- (older) Add a stop by re-planning everything ----------
+async function resolveExtra(it, rem) {
+  const anchors = [...rem, route.start];
+  setStatus("Looking up “" + (it.chain || it.text) + "”…");
+  if (it.chain) {
+    it.candidates = await findBranches(it.chain, anchors, 16000, PER_CHAIN);
+    if (!it.candidates.length) throw new Error("Couldn't find “" + it.chain + "” near your route. Try a different name, or type a specific address.");
+  } else {
+    const g = await geocode(it.text, anchors[0]);
+    if (!g) throw new Error("Couldn't find “" + it.text + "”. Check the spelling and add a city and state, then try again.");
+    Object.assign(it, g);
+  }
+}
+function addStop() {
+  const raw = $("addStop").value.trim();
+  if (!raw) return setStatus("Type an address or a store name to add.", true);
+  // No route under way for the day you're looking at: it simply joins that day's list.
+  if (!route || (route.day || todayKey()) !== selDay) {
+    if (lines().length >= MAX) return setStatus("You already have " + MAX + " stops, the most one route can hold.", true);
+    const empty = rows.find(r => !r.stop.value.trim());
+    const at = raw.lastIndexOf("@");
+    empty.stop.value = at >= 0 ? raw.slice(0, at).trim() : raw;
+    empty.time.value = at >= 0 ? raw.slice(at + 1).trim() : "";
+    syncFromRows();
+    closeAdd();
+    return setStatus("Added “" + raw + "” to your stops. Tap Find my route when you're ready.");
+  }
+  if (route.stops.filter(s => !s.done).length >= MAX) return setStatus("A route can hold " + MAX + " stops at a time. Check off or finish one first.", true);
+  let it;
+  try { it = parseLine(raw, route.stops.length); } catch (e) { return setStatus(e.message, true); }
+  it.note = savedNote(raw);
+  const pk = pickFor(it.text);
+  if (pk) { it.pick = pk; it.chain = null; it.float = false; }
+  addToRoute(it);
+}
+$("addBtn").addEventListener("click", addStop);
+attachSuggest($("addStop"), {
+  query: () => $("addStop").value,
+  onPick: it => { $("addStop").value = it.text; }
+});
+$("addStop").addEventListener("keydown", e => { if (e.key === "Enter" && !e.defaultPrevented) { e.preventDefault(); addStop(); } });
+
+// ---------- Share as a link (the whole route is in the link; nothing is uploaded) ----------
+// The route is packed into short arrays and compressed, so the link stays short enough for Messages.
+const toB64 = bytes => { let bin = ""; bytes.forEach(b => bin += String.fromCharCode(b)); return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
+const fromB64 = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+async function squeeze(bytes, how) {
+  const stream = new Blob([bytes]).stream().pipeThrough(how === "zip" ? new CompressionStream("deflate-raw") : new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+const r5 = x => Math.round(x * 1e5) / 1e5;
+const short = t => (t || "").length > 70 ? t.slice(0, 67) + "…" : (t || "");
+function packRoute(r) {
+  return [2, r.dep, r.stay || 0, r.isRoad ? 1 : 0, [r5(r.start.lat), r5(r.start.lon), short(r.start.label)],
+    r.stops.map((s, i) => [s.input, s.label && s.label !== s.input ? short(s.label) : "", r5(s.lat), r5(s.lon),
+      s.win ? s.win.open : null, s.win ? s.win.close : null, s.chain ? 1 : 0, s.pin ? 1 : 0,
+      Math.round(r.legs[i].d || 0), Math.round(r.legs[i].t || 0), s.note || ""]),
+    r.end ? [r5(r.end.lat), r5(r.end.lon), short(r.end.label), r.end.home ? 1 : 0, Math.round(r.end.d || 0), Math.round(r.end.t || 0)] : null];
+}
+function unpackRoute(a) {
+  if (!Array.isArray(a) || a[0] !== 2) return a; // older links were plain objects
+  const [, dep, stay, isRoad, st, ps, en] = a;
+  return {
+    end: Array.isArray(en) ? { lat: en[0], lon: en[1], label: en[2] || "", home: !!en[3], d: en[4], t: en[5] } : undefined,
+    v: 1, dep, stay, isRoad: !!isRoad, doneBefore: 0,
+    start: { lat: st[0], lon: st[1], label: st[2] },
+    stops: ps.map(x => ({ input: x[0], label: x[1] || x[0], lat: x[2], lon: x[3],
+      win: x[4] != null || x[5] != null ? { open: x[4], close: x[5] } : null, chain: x[6] ? 1 : null, pin: !!x[7], note: x[10] || "", done: false })),
+    legs: ps.map(x => ({ d: x[8], t: x[9] }))
+  };
+}
+function validRoute(r) {
+  const ok = p => p && isFinite(p.lat) && isFinite(p.lon);
+  return r && ok(r.start) && Array.isArray(r.stops) && r.stops.length && r.stops.length <= 40 &&
+    r.stops.every(ok) && Array.isArray(r.legs) && r.legs.length === r.stops.length && isFinite(r.dep);
+}
+// Built ahead of time: Safari only allows sharing or copying right when the button is tapped.
+let shareUrl = "";
+async function prepareShare() {
+  const json = new TextEncoder().encode(JSON.stringify(packRoute(route)));
+  const base = location.origin + location.pathname;
+  try { shareUrl = base + "#z=" + toB64(await squeeze(json, "zip")); }
+  catch (e) { shareUrl = base + "#r=" + toB64(json); }
+}
+function copyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.append(ta); ta.select();
+  const ok = document.execCommand("copy"); ta.remove();
+  return ok ? Promise.resolve() : Promise.reject(new Error("copy"));
+}
+function showShareBox(url) {
+  $("shareLink").value = url;
+  $("shareBox").hidden = false;
+}
+// Copying can hang in some browsers, so give it two seconds and then point to the box.
+function tryCopy(url) {
+  showShareBox(url);
+  const timeout = new Promise((_, no) => setTimeout(() => no(new Error("slow")), 2000));
+  Promise.race([copyText(url), timeout]).then(
+    () => setStatus("Link copied. Paste it into Messages, an email or anywhere else; whoever opens it sees this route."),
+    () => { setStatus("Your route link is below. Tap Copy, or select it and copy it yourself."); $("shareLink").select(); });
+}
+$("copyBtn").addEventListener("click", () => {
+  const inp = $("shareLink");
+  inp.focus(); inp.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) {}
+  if (ok) setStatus("Link copied.");
+  else tryCopy(inp.value);
+});
+$("share").addEventListener("click", () => {
+  if (!route) return;
+  // If the short link is still being made, use the plain one so the button always works.
+  const url = shareUrl || location.origin + location.pathname + "#r=" + toB64(new TextEncoder().encode(JSON.stringify(packRoute(route))));
+  // Phones get the share menu; computers get the link copied, ready to paste into Messages, email or anywhere.
+  if (isPhone && navigator.share) {
+    showShareBox(url);
+    navigator.share({ title: "My route", url }).catch(e => { if (e.name !== "AbortError") tryCopy(url); });
+    return;
+  }
+  tryCopy(url);
+});
+
+// ---------- Find my route ----------
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const raw = lines();
+  if (!raw.length) return setStatus("Enter at least one address.", true);
+  if (raw.length > MAX) return setStatus("That's " + raw.length + " stops. Remove some so there are " + MAX + " or fewer.", true);
+
+  btn.disabled = true;
+  try {
+    const items = raw.map(parseLine);
+    items.forEach(it => { const pk = pickFor(it.text); if (pk) { it.pick = pk; it.chain = null; it.float = false; } });
+    const stay = Math.max(0, Math.min(240, parseFloat($("stay").value) || 0));
+    // Times are for the day you're planning: your leave time, or 8:00 AM on a future day.
+    let dep = Date.now();
+    if ($("leave").value) {
+      const [h, m] = $("leave").value.split(":").map(Number);
+      const d = keyDate(selDay); d.setHours(h, m, 0, 0); dep = d.getTime();
+    } else if (selDay !== todayKey()) {
+      const d = keyDate(selDay); d.setHours(8, 0, 0, 0); dep = d.getTime();
+    }
+
+    let start;
+    const typedStart = $("start").value.trim();
+    if (typedStart) {
+      setStatus("Looking up your starting address…");
+      const g = pickFor(typedStart) || await geocode(typedStart, null);
+      if (!g) throw new Error("Couldn't find your current address “" + typedStart + "”. Add a city and state, then try again.");
+      start = { ...g, label: typedStart };
+      store.set("lastPos", JSON.stringify({ lat: g.lat, lon: g.lon }));
+    } else {
+      setStatus("Getting your location…");
+      try {
+        start = { ...(await getLocation()), label: "Your location" };
+        store.set("lastPos", JSON.stringify({ lat: start.lat, lon: start.lon }));
+      } catch (err) {
+        $("start").focus();
+        throw new Error(err.code === 1
+          ? "Your browser blocked location for this site. Type your current address in the box above, then tap Find my route."
+          : "Your browser couldn't find your location. Type your current address in the box above, then tap Find my route.");
+      }
+    }
+
+    const fixed = items.filter(it => !it.chain);
+    for (let k = 0; k < fixed.length; k++) {
+      const it = fixed[k];
+      setStatus("Looking up address " + (k + 1) + " of " + fixed.length + "…");
+      const g = it.pick || await geocode(it.text, start);
+      if (!g) throw new Error("Couldn't find stop " + (items.indexOf(it) + 1) + ", “" + it.text + "”. Check the spelling and add a city and state, then try again.");
+      Object.assign(it, g);
+    }
+    const anchors = [start, ...fixed];
+    items.forEach((it, i) => { it.lead = it.chain && !it.float ? i - 1 : -2; });
+    // All store searches run at the same time.
+    const storeItems = items.filter(it => it.chain);
+    if (storeItems.length) setStatus(storeItems.length === 1 ? "Finding “" + storeItems[0].chain + "”…" : "Finding " + storeItems.length + " stores and places along your route…");
+    await Promise.all(storeItems.map(async it => {
+      const i = items.indexOf(it);
+      let near = anchors, radius = 16000, limit = PER_CHAIN;
+      if (!it.float) {
+        // Stays right after the line above: search around the closest address above it.
+        let prev = start;
+        for (let k = i - 1; k >= 0; k--) if (!items[k].chain) { prev = items[k]; break; }
+        near = [prev]; radius = 25000; limit = 8;
+      }
+      it.candidates = await findBranches(it.chain, near, radius, limit);
+    }));
+    const missing = storeItems.find(it => !it.candidates.length);
+    if (missing) throw new Error("Couldn't find “" + missing.chain + "” near " + (missing.float ? "your route" : "the stop above it") + ". Try a different name, or type a specific address.");
+
+    let end = null;
+    const endMode = $("endMode").value;
+    if (endMode === "start") end = { lat: start.lat, lon: start.lon, label: start.label || "", home: true };
+    else if (endMode === "other") {
+      const t = $("endAddr").value.trim();
+      if (!t) throw new Error("Type an end address under Options, or set Route ends at to a different choice.");
+      setStatus("Looking up your end address…");
+      const g = pickFor(t) || await geocode(t, start);
+      if (!g) throw new Error("Couldn't find the end address “" + t + "”. Add a city and state, then try again.");
+      end = { lat: g.lat, lon: g.lon, label: t, home: false };
+    }
+    const r = await optimize(start, items, dep, stay, end);
+    r.day = selDay;
+    await fillStoreAddresses(r);
+    editingNote = -1;
+    setRoute(r);
+    setStatus("");
+    if (location.hash) history.replaceState(null, "", location.pathname);
+  } catch (err) {
+    setStatus(err.message || "Something went wrong. Try again.", true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------- On load: a shared link, or the route you were last working on ----------
+(async function init() {
+  const h = /#([rz])=([\w-]+)/.exec(location.hash);
+  if (h) {
+    try {
+      let bytes = fromB64(h[2]);
+      if (h[1] === "z") bytes = await squeeze(bytes, "unzip");
+      const r = unpackRoute(JSON.parse(new TextDecoder().decode(bytes)));
+      if (!validRoute(r)) throw new Error();
+      r.stops.forEach(s => { s.done = false; s.chain = s.chain ? 1 : null; });
+      setRoute(r);
+      setStatus("Showing a route someone shared with you.");
+    } catch (e) {
+      setStatus("This shared link looks damaged. Ask for it to be sent again.", true);
+    }
+    return;
+  }
+  try {
+    const saved = JSON.parse(store.get("route") || "null");
+    if (validRoute(saved)) {
+      if (!saved.day) saved.day = dkey(new Date(saved.dep));
+      setRoute(saved, false);
+    }
+  } catch (e) {}
+})().finally(() => { calReady = true; renderCal(); showDay(); });
+
+// ---------- Live GPS driving mode ----------
+// Follows your position on a full-screen map, shows the next turn in a banner, speaks it,
+// re-routes when you leave the route, and moves on to the next stop when you arrive.
+const nav = {
+  on: false, watch: null, map: null, layer: null, me: null, line: null,
+  stopIdx: -1, legRoute: null, geom: null, cum: null, stepStart: null, total: 0,
+  lastIdx: 0, offCount: 0, lastReroute: 0, routing: false, spoken: {}, voice: true,
+  follow: true, fix: null, prevFix: null, heading: 0, wake: null, arrived: false
+};
+try { nav.voice = store.get("navVoice") !== "off"; } catch (e) {}
+
+// Meters between two {lat, lon} points.
+function geoDist(a, b) {
+  const R = 6371000, rad = x => x * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+function geoBearing(a, b) {
+  const rad = x => x * Math.PI / 180, y = Math.sin(rad(b.lon - a.lon)) * Math.cos(rad(b.lat));
+  const x = Math.cos(rad(a.lat)) * Math.sin(rad(b.lat)) - Math.sin(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.cos(rad(b.lon - a.lon));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+const navStops = () => route ? route.stops : [];
+const nextOpenStop = from => navStops().findIndex((s, i) => i >= from && !s.done);
+const navName = i => navStops()[i].input.replace(/\s*@.*$/, "");
+const navTargetPt = () => nav.toEnd ? route.end : navStops()[nav.stopIdx];
+const navTargetName = () => nav.toEnd ? (route.end.home ? "your start" : route.end.label) : "stop " + (nav.stopIdx + 1) + ", " + navName(nav.stopIdx);
+
+function spokenDist(m) {
+  const ft = m * 3.28084, mi = m / 1609.344;
+  if (mi >= 0.95) return mi.toFixed(1).replace(/\.0$/, "") + (mi < 1.05 ? " mile" : " miles");
+  if (mi >= 0.4) return mi >= 0.7 ? "three quarters of a mile" : "half a mile";
+  if (mi >= 0.2) return "a quarter mile";
+  return Math.max(50, Math.round(ft / 50) * 50) + " feet";
+}
+function say(text) {
+  if (!nav.voice || !window.speechSynthesis) return;
+  text = text.replace(/^(In [^,]+, )([A-Z])/, (m, lead, ch) => lead + ch.toLowerCase());
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1; u.lang = "en-US";
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+
+async function keepAwake() {
+  try { if ("wakeLock" in navigator && !nav.wake) { nav.wake = await navigator.wakeLock.request("screen"); nav.wake.addEventListener("release", () => { nav.wake = null; }); } } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => { if (nav.on && document.visibilityState === "visible") keepAwake(); });
+
+function navBanner(arrow, dist, text, sub) {
+  $("navArrow").textContent = arrow;
+  $("navDist").textContent = dist;
+  $("navText").textContent = text;
+  $("navSub").textContent = sub || "";
+}
+function navSetStatus(text) { $("navStatus").textContent = text || ""; $("navStatus").hidden = !text; }
+
+function startDriving() {
+  if (!route) return;
+  if (!window.L) { setStatus("The map didn't load. Check your internet connection, then reload the page.", true); return; }
+  if (!navigator.geolocation) { setStatus("This browser can't share your location, so driving mode can't follow you.", true); return; }
+  const first = nextOpenStop(0);
+  if (first < 0 && !route.end) { setStatus("Every stop is already marked done.", false); return; }
+  nav.toEnd = first < 0;
+  nav.on = true; nav.stopIdx = first; nav.legRoute = null; nav.geom = null; nav.arrived = false; nav.follow = true;
+  nav.fix = null; nav.prevFix = null; nav.spoken = {};
+  $("nav").hidden = false;
+  document.body.classList.add("navOpen");
+  $("navVoice").textContent = nav.voice ? "Voice on" : "Voice off";
+  $("navVoice").setAttribute("aria-pressed", String(nav.voice));
+  $("navArrive").hidden = true;
+  $("navRecenter").hidden = true;
+  navBanner("◎", "", "Finding your location…", "Allow location if your browser asks.");
+  navSetStatus("");
+  if (!nav.map) {
+    nav.map = L.map("navMap", { zoomControl: false, attributionControl: true });
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' }).addTo(nav.map);
+    L.control.zoom({ position: "bottomright" }).addTo(nav.map);
+    nav.layer = L.layerGroup().addTo(nav.map);
+    nav.map.on("dragstart", () => { if (!nav.on) return; nav.follow = false; $("navRecenter").hidden = false; });
+  }
+  nav.layer.clearLayers(); nav.me = null; nav.line = null; nav.restLine = null;
+  setTimeout(() => nav.map.invalidateSize(), 50);
+  const s = navTargetPt();
+  nav.map.setView([s.lat, s.lon], 14);
+  drawNavStops();
+  keepAwake();
+  if (nav.voice && window.speechSynthesis) { try { speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) {} } // unlocks speech on iPhone
+  nav.watch = navigator.geolocation.watchPosition(onNavFix, onNavError, { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
+}
+
+function stopDriving() {
+  flushGps();
+  nav.on = false;
+  if (nav.watch != null) navigator.geolocation.clearWatch(nav.watch);
+  nav.watch = null;
+  try { if (nav.wake) nav.wake.release(); } catch (e) {}
+  nav.wake = null;
+  try { speechSynthesis.cancel(); } catch (e) {}
+  $("nav").hidden = true;
+  document.body.classList.remove("navOpen");
+  if (route) { render(); drawMap(); }
+}
+
+function onNavError(err) {
+  if (!nav.on) return;
+  if (err.code === 1) {
+    navBanner("!", "", "Location is blocked for this site.", "Allow location for this site in your browser settings, then tap Exit and Start driving again.");
+  } else {
+    navSetStatus("Weak GPS signal. Still trying…");
+  }
+}
+
+function drawNavStops() {
+  if (!nav.layer) return;
+  if (nav.stopLayer) nav.stopLayer.remove();
+  nav.stopLayer = L.layerGroup().addTo(nav.map);
+  if (route.end && !route.end.home) L.marker([route.end.lat, route.end.lon], { interactive: false, icon: L.divIcon({ className: "", html: '<div class="pin endpin' + (nav.toEnd ? " navTarget" : "") + '">⌂</div>', iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(nav.stopLayer);
+  navStops().forEach((s, i) => {
+    if (s.done) return;
+    const cls = "pin" + (i === nav.stopIdx && !nav.toEnd ? " navTarget" : "");
+    L.marker([s.lat, s.lon], { interactive: false, icon: L.divIcon({ className: "", html: '<div class="' + cls + '">' + (i + 1) + "</div>", iconSize: [28, 28], iconAnchor: [14, 14] }) }).addTo(nav.stopLayer);
+  });
+  drawNavRest();
+}
+
+// The rest of the trip after the stop you're heading to, drawn faintly so you can see the whole path.
+async function drawNavRest() {
+  if (nav.restLine) { nav.restLine.remove(); nav.restLine = null; }
+  const pts = [];
+  if (!nav.toEnd) {
+    pts.push(navStops()[nav.stopIdx]);
+    navStops().forEach((s, i) => { if (i > nav.stopIdx && !s.done) pts.push(s); });
+    if (route.end) pts.push(route.end);
+  }
+  const key = pts.map(p => p.lat.toFixed(5) + "," + p.lon.toFixed(5)).join(";");
+  nav.restKey = key;
+  if (pts.length < 2) return;
+  let path = nav.restCache && nav.restCache.key === key ? nav.restCache.path : null;
+  if (!path) {
+    try {
+      const coords = pts.map(p => p.lon.toFixed(6) + "," + p.lat.toFixed(6)).join(";");
+      const res = await fetch("https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson");
+      const j = await res.json();
+      if (j.code === "Ok" && j.routes[0]) path = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+    } catch (e) {}
+    if (path) nav.restCache = { key, path };
+  }
+  if (!nav.on || nav.restKey !== key) return;
+  if (nav.restLine) nav.restLine.remove();
+  nav.restLine = L.polyline(path || pts.map(p => [p.lat, p.lon]), { color: "#6b7a86", weight: 5, opacity: 0.6, dashArray: "2 10", lineCap: "round", interactive: false }).addTo(nav.layer);
+  nav.restLine.bringToBack();
+}
+
+// Route from where you are to the stop you're heading to, with every turn.
+async function navRoute(from) {
+  if (nav.routing) return;
+  nav.routing = true;
+  const s = navTargetPt();
+  try {
+    const coords = from.lon.toFixed(6) + "," + from.lat.toFixed(6) + ";" + s.lon.toFixed(6) + "," + s.lat.toFixed(6);
+    const res = await fetch("https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson&steps=true");
+    const j = await res.json();
+    if (j.code !== "Ok" || !j.routes || !j.routes[0]) throw new Error("route");
+    if (!nav.on) return;
+    const rt = j.routes[0];
+    nav.legRoute = rt;
+    nav.geom = rt.geometry.coordinates.map(c => ({ lat: c[1], lon: c[0] }));
+    nav.cum = [0];
+    for (let i = 1; i < nav.geom.length; i++) nav.cum.push(nav.cum[i - 1] + geoDist(nav.geom[i - 1], nav.geom[i]));
+    nav.total = nav.cum[nav.cum.length - 1] || 1;
+    // Where each turn happens, measured along the line.
+    const steps = rt.legs[0].steps, scale = nav.total / (rt.distance || nav.total);
+    let acc = 0;
+    nav.stepStart = steps.map(st => { const v = acc * scale; acc += st.distance; return v; });
+    nav.lastIdx = 0; nav.offCount = 0; nav.spoken = {};
+    if (nav.line) nav.line.remove();
+    nav.line = L.polyline(nav.geom.map(p => [p.lat, p.lon]), { color: "#1d6fe0", weight: 7, opacity: 0.9 }).addTo(nav.layer);
+    if (nav.me) nav.me.bringToFront?.();
+    navSetStatus("");
+    if (nav.fix) navUpdate(nav.fix);
+  } catch (e) {
+    if (nav.on) navSetStatus("Couldn't get directions right now. Retrying…");
+    nav.legRoute = null;
+  } finally {
+    nav.routing = false;
+    nav.lastReroute = Date.now();
+  }
+}
+
+// Closest point on the route line to you: how far along it you are, and how far off it.
+function navProject(p) {
+  const g = nav.geom, kx = Math.cos(p.lat * Math.PI / 180) * 111320, ky = 110540;
+  let best = { off: Infinity, along: 0, idx: nav.lastIdx };
+  const lo = Math.max(0, nav.lastIdx - 30), hi = Math.min(g.length - 1, nav.lastIdx + 400);
+  const scan = (a, b) => {
+    for (let i = a; i < b; i++) {
+      const ax = (g[i].lon - p.lon) * kx, ay = (g[i].lat - p.lat) * ky;
+      const bx = (g[i + 1].lon - p.lon) * kx, by = (g[i + 1].lat - p.lat) * ky;
+      const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+      const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+      const off = Math.hypot(ax + t * dx, ay + t * dy);
+      if (off < best.off) best = { off, along: nav.cum[i] + t * (nav.cum[i + 1] - nav.cum[i]), idx: i };
+    }
+  };
+  scan(lo, hi);
+  if (best.off > 80) scan(0, g.length - 1);
+  return best;
+}
+
+function onNavFix(pos) {
+  if (!nav.on) return;
+  const c = pos.coords, p = { lat: c.latitude, lon: c.longitude, acc: c.accuracy || 50, t: pos.timestamp };
+  // Direction of travel: from the GPS when moving, otherwise from the last two positions.
+  if (c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 1) nav.heading = c.heading;
+  else if (nav.fix && geoDist(nav.fix, p) > 8) nav.heading = geoBearing(nav.fix, p);
+  // Count the miles actually driven (only from good readings, ignoring jumps).
+  if (nav.fix && p.acc <= 50 && (nav.fix.acc || 99) <= 50) {
+    const seg = geoDist(nav.fix, p);
+    if (seg > 5 && seg < 1000) nav.gpsPending = (nav.gpsPending || 0) + seg;
+  }
+  if (nav.gpsPending > 0 && Date.now() - (nav.gpsSaved || 0) > 30000) flushGps();
+  nav.prevFix = nav.fix; nav.fix = p;
+  navSetStatus(p.acc > 100 ? "Weak GPS signal (±" + Math.round(p.acc * 3.28084) + " ft)" : "");
+
+  const arrowHtml = '<div class="navMe" style="transform: rotate(' + Math.round(nav.heading) + 'deg)"><svg viewBox="0 0 40 40" width="40" height="40"><circle cx="20" cy="20" r="17" fill="#1d6fe0" stroke="#fff" stroke-width="3"/><path d="M20 8 L28 28 L20 23 L12 28 Z" fill="#fff"/></svg></div>';
+  if (!nav.me) nav.me = L.marker([p.lat, p.lon], { interactive: false, zIndexOffset: 1000, icon: L.divIcon({ className: "", html: arrowHtml, iconSize: [40, 40], iconAnchor: [20, 20] }) }).addTo(nav.layer);
+  else { nav.me.setLatLng([p.lat, p.lon]); nav.me.setIcon(L.divIcon({ className: "", html: arrowHtml, iconSize: [40, 40], iconAnchor: [20, 20] })); }
+  if (nav.follow) nav.map.setView([p.lat, p.lon], Math.max(nav.map.getZoom(), 16), { animate: !matchMedia("(prefers-reduced-motion: reduce)").matches });
+
+  if (!nav.legRoute) { if (!nav.routing && Date.now() - nav.lastReroute > 4000) navRoute(p); return; }
+  navUpdate(p);
+}
+
+function navUpdate(p) {
+  if (nav.arrived || !nav.legRoute) return;
+  const s = navTargetPt();
+  const toStop = geoDist(p, s);
+  const pr = navProject(p);
+  nav.lastIdx = pr.idx;
+  const left = Math.max(0, nav.total - pr.along);
+
+  // Arrived: close to the stop, or at the end of the line.
+  if (toStop < 45 || (left < 30 && toStop < 120)) return navArrive();
+
+  // Off the route: a few readings in a row well away from the line, then plan a new route.
+  const limit = Math.max(50, Math.min(120, p.acc * 1.5));
+  nav.offCount = pr.off > limit ? nav.offCount + 1 : 0;
+  if (nav.offCount >= 3 && !nav.routing && Date.now() - nav.lastReroute > 10000) {
+    navSetStatus("Off route. Finding a new route…");
+    say("Rerouting");
+    navRoute(p);
+    return;
+  }
+
+  // The next turn is the first one still ahead of you.
+  const steps = nav.legRoute.legs[0].steps;
+  let k = steps.findIndex((st, i) => i > 0 && nav.stepStart[i] > pr.along + 8);
+  if (k < 0) k = steps.length - 1;
+  const st = steps[k], dist = Math.max(0, nav.stepStart[k] - pr.along);
+  const text = stepText(st, navTargetName(), "");
+  // When the following turn comes right after this one, show it too.
+  const after = steps[k + 1];
+  const then = after && st.distance < 200 ? "Then " + stepText(after, "stop " + (nav.stopIdx + 1), "").replace(/^./, ch => ch.toLowerCase()) : "";
+  const eta = new Date(Date.now() + (nav.legRoute.duration || 0) * (left / nav.total) * 1000);
+  navBanner(stepArrow(st), shortDist(dist), text, then);
+  $("navNext").textContent = nav.toEnd ? (route.end.home ? "⌂ Back to start" : "⌂ " + route.end.label) : (nav.stopIdx + 1) + " · " + navName(nav.stopIdx);
+  $("navEta").textContent = shortDist(left) + " · arrive " + fmtClock(eta);
+
+  // Voice: an early heads-up, then again right before the turn.
+  const sp = nav.spoken[k] || (nav.spoken[k] = {});
+  if (!sp.first) { sp.first = true; if (dist > 250) { say("In " + spokenDist(dist) + ", " + text); return; } }
+  if (!sp.far && dist <= 800 && dist > 400) { sp.far = true; say("In " + spokenDist(dist) + ", " + text); }
+  else if (!sp.near && dist <= 120) { sp.near = true; sp.far = true; say(dist > 40 ? "In " + spokenDist(dist) + ", " + text : text); }
+}
+
+function navArrive() {
+  nav.arrived = true;
+  if (nav.toEnd) {
+    const msg = route.end.home ? "You're back at your start" : "You've reached your end point";
+    route.endReached = true; saveRoute();
+    navBanner("✓", "", msg, "All done for this route. Tap Exit to close driving mode.");
+    $("navEta").textContent = "Arrived";
+    say(msg);
+    return;
+  }
+  const i = nav.stopIdx, name = navName(i);
+  navBanner("⚑", "", "Arrived at stop " + (i + 1), name);
+  $("navEta").textContent = "Arrived";
+  $("navArrive").hidden = false;
+  const more = nextOpenStop(i + 1) >= 0 || !!route.end;
+  $("navDone").textContent = nextOpenStop(i + 1) >= 0 ? "Mark done · next stop" : route.end ? "Mark done · head to end" : "Mark done · finish";
+  $("navSkip").textContent = more ? "Skip to next stop" : "Finish";
+  say("You have arrived at stop " + (i + 1) + ", " + name);
+}
+
+function navGoNext(markDone) {
+  const i = nav.stopIdx, s = navStops()[i];
+  if (markDone) { s.done = true; s.doneAt = Date.now(); saveRoute(); }
+  const next = nextOpenStop(i + 1);
+  $("navArrive").hidden = true;
+  if (next < 0 && route.end) {
+    nav.toEnd = true; nav.arrived = false; nav.legRoute = null; nav.geom = null;
+    if (nav.line) { nav.line.remove(); nav.line = null; }
+    drawNavStops();
+    navBanner("◎", "", route.end.home ? "Getting directions back to your start…" : "Getting directions to your end point…", route.end.home ? "" : route.end.label);
+    if (nav.fix) navRoute(nav.fix);
+    return;
+  }
+  if (next < 0) {
+    navBanner("✓", "", "All stops done", "Nice work. Tap Exit to close driving mode.");
+    say("All stops are done.");
+    nav.arrived = true;
+    return;
+  }
+  nav.stopIdx = next; nav.arrived = false; nav.legRoute = null; nav.geom = null;
+  if (nav.line) { nav.line.remove(); nav.line = null; }
+  drawNavStops();
+  navBanner("◎", "", "Getting directions to stop " + (next + 1) + "…", navName(next));
+  if (nav.fix) navRoute(nav.fix);
+}
+
+$("startDrive").addEventListener("click", startDriving);
+$("navExit").addEventListener("click", stopDriving);
+$("navDone").addEventListener("click", () => navGoNext(true));
+$("navSkip").addEventListener("click", () => navGoNext(false));
+$("navRecenter").addEventListener("click", () => {
+  nav.follow = true; $("navRecenter").hidden = true;
+  if (nav.fix) nav.map.setView([nav.fix.lat, nav.fix.lon], Math.max(nav.map.getZoom(), 16));
+});
+$("navVoice").addEventListener("click", () => {
+  nav.voice = !nav.voice;
+  store.set("navVoice", nav.voice ? "on" : "off");
+  $("navVoice").textContent = nav.voice ? "Voice on" : "Voice off";
+  $("navVoice").setAttribute("aria-pressed", String(nav.voice));
+  if (!nav.voice) { try { speechSynthesis.cancel(); } catch (e) {} } else say("Voice directions on");
+});
+document.addEventListener("keydown", e => { if (nav.on && e.key === "Escape") stopDriving(); });
+
+// ---------- Mileage log and daily summary ----------
+// Per day: each finished stop's leg (road miles, drive seconds), counted once per stop, plus GPS miles from driving mode.
+function mileBook() { try { return JSON.parse(store.get("mileLog") || "{}") || {}; } catch (e) { return {}; } }
+function saveMile(b) { store.set("mileLog", JSON.stringify(b)); }
+const gasFor = m => { const mpg = parseFloat($("mpg").value), price = parseFloat($("price").value); return mpg > 0 && price >= 0 && $("price").value !== "" ? m / 1609.344 / mpg * price : null; };
+function logFromRoute() {
+  if (!route) return;
+  const k = route.day || todayKey(), book = mileBook(), e = book[k] || {};
+  e.s = e.s || {};
+  let changed = false;
+  route.stops.forEach((st, i) => {
+    if (!st.done) return;
+    const key = noteKey(st.input), v = [Math.round(route.legs[i].d || 0), Math.round(route.legs[i].t || 0)];
+    if (!e.s[key]) { e.s[key] = v; changed = true; }
+  });
+  if (route.end && route.endReached && !e.s.__end) { e.s.__end = [Math.round(route.end.d || 0), Math.round(route.end.t || 0)]; changed = true; }
+  if (!changed) return;
+  const g = gasFor(dayMeters(e));
+  if (g != null) e.g = Math.round(g * 100) / 100;
+  book[k] = e; saveMile(book); renderMileLog();
+}
+function unlogStop(st) {
+  const k = (route && route.day) || todayKey(), book = mileBook(), e = book[k];
+  if (!e || !e.s) return;
+  delete e.s[noteKey(st.input)];
+  const g = gasFor(dayMeters(e));
+  if (g != null) e.g = Math.round(g * 100) / 100;
+  if (!Object.keys(e.s).length && !e.gps) delete book[k]; else book[k] = e;
+  saveMile(book); renderMileLog();
+}
+function flushGps() {
+  if (!(nav.gpsPending > 0)) return;
+  const k = todayKey(), book = mileBook(), e = book[k] || { s: {} };
+  e.gps = Math.round((e.gps || 0) + nav.gpsPending);
+  nav.gpsPending = 0; nav.gpsSaved = Date.now();
+  book[k] = e; saveMile(book); renderMileLog();
+}
+function mergeMileLog(theirs) {
+  const book = mileBook();
+  for (const [k, e] of Object.entries(theirs || {})) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || !e || typeof e !== "object") continue;
+    const mine = book[k] || { s: {} };
+    mine.s = { ...(e.s || {}), ...(mine.s || {}) };
+    mine.gps = Math.max(mine.gps || 0, e.gps || 0);
+    if (mine.g == null && e.g != null) mine.g = e.g;
+    book[k] = mine;
+  }
+  saveMile(book); renderMileLog();
+}
+const dayMeters = e => Object.values(e.s || {}).reduce((a, v) => a + (v[0] || 0), 0);
+const daySecs = e => Object.values(e.s || {}).reduce((a, v) => a + (v[1] || 0), 0);
+const dayStops = e => Object.keys(e.s || {}).filter(x => x !== "__end").length;
+const mi1 = m => (m / 1609.344).toFixed(1);
+function sumDays(keys, book) {
+  let m = 0, g = 0, n = 0, gps = 0, gas = 0;
+  for (const k of keys) { const e = book[k]; m += dayMeters(e); g += daySecs(e); n += dayStops(e); gps += e.gps || 0; gas += e.g || 0; }
+  return { m, g, n, gps, gas };
+}
+function weekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - x.getDay()); return x; }
+const dayKeyOf = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+function renderMileLog() {
+  const book = mileBook(), keys = Object.keys(book).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort().reverse();
+  const today = todayKey(), now = new Date();
+  const wk = dayKeyOf(weekStart(now)), mo = today.slice(0, 8) + "01";
+  const rate = parseFloat($("mileRate").value);
+  const cards = [["Today", keys.filter(k => k === today)], ["This week", keys.filter(k => k >= wk)], ["This month", keys.filter(k => k >= mo)]];
+  const cw = $("logCards");
+  cw.replaceChildren();
+  for (const [label, ks] of cards) {
+    const t = sumDays(ks, book), c = document.createElement("div");
+    c.className = "logCard";
+    const lab = document.createElement("span"); lab.className = "k"; lab.textContent = label;
+    const b = document.createElement("b"); b.textContent = mi1(t.m) + " mi";
+    const sm = document.createElement("small");
+    sm.textContent = t.n + (t.n === 1 ? " stop" : " stops") + (t.g ? " · " + hm(t.g) : "") + (t.gas ? " · $" + t.gas.toFixed(2) : "") + (rate > 0 && t.m ? " · $" + (t.m / 1609.344 * rate).toFixed(2) + " back" : "");
+    c.append(lab, b, sm); cw.append(c);
+  }
+  $("logEmpty").hidden = keys.length > 0;
+  $("logTableWrap").hidden = !keys.length;
+  const tb = $("logRows");
+  tb.replaceChildren();
+  document.querySelector(".logTable").classList.toggle("withRate", rate > 0);
+  for (const k of keys.slice(0, 31)) {
+    const e = book[k], tr = document.createElement("tr");
+    if (k === today) tr.className = "today";
+    const m = dayMeters(e);
+    const cells = [k === today ? "Today" : keyDate(k).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }), String(dayStops(e)), mi1(m),
+      e.gps ? mi1(e.gps) : "–", daySecs(e) ? hm(daySecs(e)) : "–", e.g != null ? "$" + e.g.toFixed(2) : "–", rate > 0 ? "$" + (m / 1609.344 * rate).toFixed(2) : ""];
+    cells.forEach((v, i) => { const td = document.createElement("td"); td.textContent = v; if (i === 6) td.className = "rateCol"; tr.append(td); });
+    tb.append(tr);
+  }
+  const tm = sumDays(keys.filter(k => k >= mo), book);
+  $("logSum").textContent = "Mileage log" + (tm.m ? " · " + mi1(tm.m) + " mi this month" : "");
+}
+function rangeKeys(range, keys) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const first = (yy, mm) => dayKeyOf(new Date(yy, mm, 1));
+  if (range === "month") return keys.filter(k => k >= first(y, m));
+  if (range === "last") return keys.filter(k => k >= first(y, m - 1) && k < first(y, m));
+  if (range === "year") return keys.filter(k => k.startsWith(String(y)));
+  return keys;
+}
+$("logExport").addEventListener("click", async () => {
+  const book = mileBook(), range = $("logRange").value;
+  const keys = rangeKeys(range, Object.keys(book).sort());
+  if (!keys.length) return setStatus("No miles logged for that period yet.", true);
+  const rate = parseFloat($("mileRate").value);
+  const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  const head = ["Date", "Stops", "Road miles", "GPS miles", "Drive minutes", "Gas cost"].concat(rate > 0 ? ["Reimbursement ($" + rate + "/mi)"] : []);
+  const rows = keys.map(k => { const e = book[k], m = dayMeters(e);
+    return [k, dayStops(e), mi1(m), e.gps ? mi1(e.gps) : "", Math.round(daySecs(e) / 60), e.g != null ? e.g.toFixed(2) : ""].concat(rate > 0 ? [(m / 1609.344 * rate).toFixed(2)] : []); });
+  const t = sumDays(keys, book);
+  rows.push(["Total", t.n, mi1(t.m), t.gps ? mi1(t.gps) : "", Math.round(t.g / 60), t.gas ? t.gas.toFixed(2) : ""].concat(rate > 0 ? [(t.m / 1609.344 * rate).toFixed(2)] : []));
+  const csv = [head, ...rows].map(r => r.map(v => q(String(v))).join(",")).join("\r\n");
+  const name = "mileage-" + (range === "all" ? "all" : keys[0].slice(0, 7) + (range === "year" ? "-year" : "")) + ".csv";
+  const file = new File([csv], name, { type: "text/csv" });
+  if (isPhone && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "Mileage log" }); return setStatus("Mileage exported."); } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  setStatus("Mileage downloaded as " + name + ". It opens in Excel, Numbers or Google Sheets.");
+});
+$("mileRate").value = store.get("mileRate") || "";
+$("mileRate").addEventListener("input", () => { store.set("mileRate", $("mileRate").value); renderMileLog(); });
+renderMileLog();
+
+// ---------- Backup reminder ----------
+function renderNudge() {
+  const el = $("backupNudge");
+  if (!el) return;
+  const last = +store.get("lastBackup") || 0, snooze = +store.get("nudgeSnooze") || 0;
+  const hasData = Object.keys(daysBook()).length || unBook().length || Object.keys(mileBook()).length;
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const due = hasData && (last ? days >= 7 : true) && Date.now() > snooze;
+  el.hidden = !due;
+  if (due) $("nudgeText").textContent = last ? "It's been " + days + " days since your last backup. Your schedule and mileage live only on this device." : "Your schedule and mileage live only on this device. Back them up so you don't lose them.";
+}
+$("nudgeBackup").addEventListener("click", () => { $("backupBtn").click(); $("backupNudge").hidden = true; });
+$("nudgeLater").addEventListener("click", () => { store.set("nudgeSnooze", String(Date.now() + 3 * 86400000)); $("backupNudge").hidden = true; });
+renderNudge();
+
+// ---------- Install as an app, offline loading, and new-version notice ----------
+const APP_VERSION = (document.body.innerHTML.match(/Version (\d+) ·/) || [])[1] || "0";
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+async function checkForUpdate() {
+  if (!navigator.onLine || (typeof nav !== "undefined" && nav.on)) return;
+  try {
+    const res = await fetch("./?check=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const live = ((await res.text()).match(/Version (\d+) ·/) || [])[1];
+    if (live && +live > +APP_VERSION) $("updateBar").hidden = false;
+  } catch (e) {}
+}
+$("updateBtn").addEventListener("click", () => location.reload());
+if ((location.protocol === "https:" || location.hostname === "localhost")) {
+  setTimeout(checkForUpdate, 4000);
+  setInterval(checkForUpdate, 30 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
+}
+</script>
+</body>
+</html>
