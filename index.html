@@ -343,7 +343,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 17 · Nov 7, 2026</p>
+  <p class="note">Version 19 · Nov 11, 2026</p>
 </main>
 
 <script>
@@ -354,6 +354,8 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 };
+// Ask the browser not to clear saved schedules when it tidies up storage.
+try { navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {}); } catch (e) {}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ---------- Saved inputs ----------
@@ -678,14 +680,51 @@ function biasPoint() {
   if (typeof route !== "undefined" && route) return route.stops.find(x => !x.done) || route.start;
   try { return JSON.parse(store.get("lastPos") || "null"); } catch (e) { return null; }
 }
+// "75 S Sandusky St, Delaware" → "75 S Sandusky St, Delaware, OH 43015"
+function censusItem(m) {
+  const tc = s => s.toLowerCase().replace(/\b\w/g, ch => ch.toUpperCase());
+  const parts = m.matchedAddress.split(",").map(s => s.trim());
+  const zip = parts.length > 3 ? parts.pop() : "", st = parts.length > 2 ? parts.pop() : "";
+  const street = tc(parts[0] || ""), city = tc(parts.slice(1).join(", "));
+  const text = [street, city, [st, zip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  return { title: street, sub: [city, [st, zip].filter(Boolean).join(" ")].filter(Boolean).join(", "), text,
+    lat: +m.coordinates.y, lon: +m.coordinates.x, label: text, exact: true };
+}
+// Esri's address search fills in partly typed addresses ("75 S Sandus" → 75 S Sandusky St, Delaware, OH).
+// Its suggestions carry no location yet; tapping one looks it up with arcgisLocate.
+const ARCGIS = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/";
+async function arcgisSuggest(q, b, signal) {
+  const loc = b && isFinite(b.lat) ? (+b.lon).toFixed(4) + "," + (+b.lat).toFixed(4) : "-82.9,40.2";
+  const res = await fetch(ARCGIS + "suggest?f=json&countryCode=USA&maxSuggestions=6&location=" + loc + "&text=" + encodeURIComponent(q), { signal });
+  if (!res.ok) return [];
+  return ((await res.json()).suggestions || []).filter(x => !x.isCollection).map(x => {
+    const parts = x.text.replace(/,\s*USA$/, "").split(",").map(t => t.trim());
+    if (parts.length >= 3 && /^\d{5}$/.test(parts[parts.length - 1])) parts.splice(-2, 2, parts[parts.length - 2] + " " + parts[parts.length - 1]);
+    const text = parts.join(", ");
+    return { title: parts[0], sub: parts.slice(1).join(", "), text, label: text, magicKey: x.magicKey, lat: NaN, lon: NaN, exact: true };
+  });
+}
+async function arcgisLocate(it) {
+  const res = await fetch(ARCGIS + "findAddressCandidates?f=json&maxLocations=1&magicKey=" + encodeURIComponent(it.magicKey) + "&SingleLine=" + encodeURIComponent(it.text));
+  const c = res.ok && ((await res.json()).candidates || [])[0];
+  return c ? { lat: c.location.y, lon: c.location.x } : null;
+}
 async function suggestPlaces(q, signal) {
+  // OpenStreetMap is missing many Ohio house numbers, so a street address also asks Esri (partly typed)
+  // and the Census (fully typed); their matches go first. Place names lead with OpenStreetMap.
+  const isAddr = /^\d+[a-z]?\s+\S/i.test(q);
+  const esri = arcgisSuggest(q, biasPoint(), signal).catch(e => { if (e.name === "AbortError") throw e; return []; });
+  const census = isAddr && /^\d+[a-z]?\s+\S+\s+\S/i.test(q) ? censusMatches(q).catch(() => []) : Promise.resolve([]);
   const b = biasPoint();
   let url = "https://photon.komoot.io/api/?limit=10&lang=en&q=" + encodeURIComponent(q);
   if (b && isFinite(b.lat)) url += "&lat=" + (+b.lat).toFixed(4) + "&lon=" + (+b.lon).toFixed(4);
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error("http");
-  const out = [], seen = new Set();
-  for (const f of (await res.json()).features || []) {
+  let features = [];
+  try {
+    const res = await fetch(url, { signal });
+    if (res.ok) features = (await res.json()).features || [];
+  } catch (e) { if (e.name === "AbortError") throw e; }
+  const osm = [];
+  for (const f of features) {
     const p = f.properties || {}, c = f.geometry && f.geometry.coordinates;
     if (!c) continue;
     const street = [p.housenumber, p.street].filter(Boolean).join(" ");
@@ -695,14 +734,23 @@ async function suggestPlaces(q, signal) {
     const name = p.name && p.name !== street && p.name !== city ? p.name : "";
     const where = [street, city, stZip].filter(Boolean).join(", ");
     if (!where) continue;
-    const text = name ? name + ", " + where : where;
-    if (seen.has(text)) continue;
-    seen.add(text);
-    out.push({
-      title: name || street || city, sub: name ? where : [city, stZip].filter(Boolean).join(", "), text,
+    osm.push({
+      title: name || street || city, sub: name ? where : [city, stZip].filter(Boolean).join(", "), text: name ? name + ", " + where : where,
       lat: c[1], lon: c[0], label: name ? name + " — " + [street, city, st].filter(Boolean).join(", ") : where
     });
+  }
+  const esriItems = await esri, censusItems = (await census).slice(0, 3).map(censusItem);
+  // For a street address, only keep OpenStreetMap matches in the U.S. with the same house number.
+  const num = isAddr ? q.match(/^\d+/)[0] : "";
+  const osmAddr = osm.filter(it => it.text.startsWith(num + " ") && /\b[A-Z]{2}( \d{5})?$/.test(it.sub));
+  const order = isAddr ? [esriItems.slice(0, 4), censusItems, osmAddr] : [osm.slice(0, 4), esriItems];
+  // Same street and city counts as the same place, whatever the ZIP or capitalization.
+  const key = it => it.text.toLowerCase().replace(/\s+\d{5}(-\d{4})?\b/g, "").replace(/\s+/g, " ");
+  const out = [], seen = new Set();
+  for (const list of order) for (const it of list) {
     if (out.length === 6) break;
+    if (seen.has(key(it))) continue;
+    seen.add(key(it)); out.push(it);
   }
   return out;
 }
@@ -720,7 +768,13 @@ function attachSuggest(field, opts) {
   field.setAttribute("aria-expanded", "false");
   let items = [], active = -1, timer = null, ctl = null, seq = 0;
   const close = () => { list.hidden = true; items = []; active = -1; field.setAttribute("aria-expanded", "false"); field.removeAttribute("aria-activedescendant"); };
-  const pick = i => { const it = items[i]; close(); if (it) { savePick(it.text, it); opts.onPick(it); } };
+  const pick = async i => {
+    const it = items[i]; close();
+    if (!it) return;
+    if (it.magicKey && !isFinite(it.lat)) { const g = await arcgisLocate(it).catch(() => null); if (g) Object.assign(it, g); }
+    if (isFinite(it.lat)) savePick(it.text, it);
+    opts.onPick(it);
+  };
   const show = () => {
     list.replaceChildren();
     items.forEach((it, i) => {
@@ -737,7 +791,7 @@ function attachSuggest(field, opts) {
     if (items.length) {
       const src = document.createElement("li");
       src.className = "src"; src.setAttribute("role", "presentation");
-      src.textContent = "Places from OpenStreetMap";
+      src.textContent = items.some(it => it.exact) ? "Addresses from Esri, the U.S. Census and OpenStreetMap" : "Places from OpenStreetMap";
       list.append(src);
     }
     list.hidden = !items.length;
@@ -818,8 +872,11 @@ function parseLine(raw, i) {
   }
   // No house number means a place name ("Shell gas station", "Wendy's", "a pharmacy").
   // Plain names stay right after the line above; "any …" can go wherever fits best.
+  // A name with a city ("COSI, Columbus, OH") is a destination, so it gets ordered like an address.
   let chain = null, float = false;
-  if (!/\d/.test(text)) {
+  if (!/\d/.test(text) && !/^any\s/i.test(text) && text.includes(",")) {
+    // destination: looked up and ordered with the other addresses
+  } else if (!/\d/.test(text)) {
     const m = /^any\s+(.+)$/i.exec(text);
     if (m) { chain = m[1].trim(); float = true; }
     else chain = text.replace(/^(?:an|a)\s+/i, "").trim();
@@ -861,7 +918,11 @@ async function getLocation() {
 
 // ---------- Address lookup: Census, then OpenStreetMap, then Photon ----------
 let jsonpId = 0;
-function censusLookup(q) {
+async function censusLookup(q) {
+  const m = (await censusMatches(q))[0];
+  return m ? { lat: +m.coordinates.y, lon: +m.coordinates.x, label: m.matchedAddress } : null;
+}
+function censusMatches(q) {
   return new Promise((resolve, reject) => {
     const cb = "censusCb" + (++jsonpId);
     const s = document.createElement("script");
@@ -869,8 +930,7 @@ function censusLookup(q) {
     const timer = setTimeout(() => { done(); reject(new Error("timeout")); }, 9000);
     window[cb] = data => {
       done();
-      const m = data && data.result && data.result.addressMatches && data.result.addressMatches[0];
-      resolve(m ? { lat: +m.coordinates.y, lon: +m.coordinates.x, label: m.matchedAddress } : null);
+      resolve((data && data.result && data.result.addressMatches) || []);
     };
     s.onerror = () => { done(); reject(new Error("network")); };
     s.src = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=jsonp&callback=" +
