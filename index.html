@@ -105,6 +105,36 @@ button:disabled { opacity: 0.55; cursor: progress; }
 #steps .arrow { color: var(--accent); text-align: center; font-size: 1.05rem; line-height: 1; }
 #steps .leg { font: 500 0.82rem/1 var(--mono); color: var(--muted); white-space: nowrap; }
 .turnDot { width: 14px; height: 14px; border-radius: 50%; background: #f59e0b; border: 3px solid #fff; box-shadow: 0 0 0 2px #f59e0b; }
+/* Mileage log */
+#logBox { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+#logBox > summary { cursor: pointer; padding: 14px; font: 700 0.95rem/1.2 var(--display); list-style: none; display: flex; justify-content: space-between; gap: 10px; }
+#logBox > summary::-webkit-details-marker { display: none; }
+#logBox > summary::after { content: "Show"; font: 500 0.8rem/1 var(--mono); color: var(--accent); }
+#logBox[open] > summary::after { content: "Hide"; }
+#logBox > summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+.logIn { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 12px; }
+.logCards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.logCard { background: var(--bg); border-radius: 8px; padding: 10px; min-width: 0; }
+.logCard b { display: block; font: 800 1.25rem/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.logCard small { display: block; color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+.logCard .k { font: 700 0.7rem/1 var(--display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px; display: block; }
+.tableWrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.logTable { width: 100%; border-collapse: collapse; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+.logTable th, .logTable td { padding: 8px 10px; text-align: right; white-space: nowrap; border-top: 1px solid var(--line); }
+.logTable th { border-top: 0; font: 700 0.72rem/1.2 var(--display); text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); background: var(--bg); }
+.logTable th:first-child, .logTable td:first-child { text-align: left; }
+.logTable tr.today td { font-weight: 700; }
+.logTable tfoot td { font-weight: 700; background: var(--bg); }
+.logTable .rateCol { display: none; }
+.logTable.withRate .rateCol { display: table-cell; }
+.logOpts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.logOpts label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+.logOpts input, .logOpts select { width: 100%; padding: 9px 11px; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+@media (max-width: 420px) { .logOpts { grid-template-columns: 1fr; } .logCard b { font-size: 1.05rem; } }
+.nudge { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 12px 14px; border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); }
+.nudge[hidden] { display: none !important; }
+.nudgeBtns { display: flex; gap: 8px; }
 /* New-version notice */
 #updateBar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6000; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--fg); color: var(--bg); font-weight: 500;
@@ -385,6 +415,10 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     </div>
   </div>
 
+  <div id="backupNudge" class="nudge" hidden role="status">
+    <span id="nudgeText">It's been a while since your last backup.</span>
+    <span class="nudgeBtns"><button id="nudgeBackup" type="button" class="mini">Back up now</button><button id="nudgeLater" type="button" class="mini">Later</button></span>
+  </div>
   <section id="result" hidden>
     <div class="totals">
       <div><b id="tDist">–</b><small>total distance</small></div>
@@ -417,7 +451,26 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 24 · Nov 11, 2026</p>
+  <details id="logBox">
+    <summary id="logSum">Mileage log</summary>
+    <div class="logIn">
+      <div class="logCards" id="logCards"></div>
+      <p id="logEmpty" class="note">No miles logged yet. Check off stops as you finish them, or use Start driving, and each day's miles show up here.</p>
+      <div class="tableWrap" id="logTableWrap" hidden>
+        <table class="logTable">
+          <thead><tr><th scope="col">Day</th><th scope="col">Stops</th><th scope="col">Miles</th><th scope="col">GPS mi</th><th scope="col">Drive</th><th scope="col">Gas</th><th scope="col" class="rateCol">Rate $</th></tr></thead>
+          <tbody id="logRows"></tbody>
+        </table>
+      </div>
+      <div class="logOpts">
+        <div><label for="mileRate">Reimbursement, $ per mile <span class="opt">optional</span></label><input id="mileRate" type="number" min="0" max="5" step="0.001" inputmode="decimal" placeholder="e.g. 0.70"></div>
+        <div><label for="logRange">Export</label><select id="logRange"><option value="month">This month</option><option value="last">Last month</option><option value="year">This year</option><option value="all">Everything</option></select></div>
+      </div>
+      <button id="logExport" type="button" class="secondary">Export mileage (CSV for Excel or Sheets)</button>
+      <p class="note">Miles are the road distance of each leg you finished, counted once per stop. GPS miles are what driving mode actually tracked. The log stays on this device and is included in schedule backups.</p>
+    </div>
+  </details>
+  <p class="note">Version 25 · Nov 11, 2026</p>
 </main>
 
 <div id="updateBar" hidden role="status"><span>A new version of the app is ready.</span><button id="updateBtn" type="button">Update now</button></div>
@@ -663,14 +716,15 @@ $("jobSave").addEventListener("click", () => {
 });
 // ---------- Backup and restore ----------
 // Everything you'd hate to lose: every day's jobs, the unscheduled list, stop notes, picked places and settings.
-const BACKUP_KEYS = ["days", "unscheduled", "notes", "picks", "route", "start", "stay", "mpg", "price", "lastPos", "endMode", "endAddr"];
+const BACKUP_KEYS = ["days", "unscheduled", "notes", "picks", "route", "start", "stay", "mpg", "price", "lastPos", "endMode", "endAddr", "mileLog", "mileRate"];
 function renderBackupInfo() {
   const last = +store.get("lastBackup") || 0, el = $("backupInfo");
   const hasData = Object.keys(daysBook()).length || unBook().length;
-  if (!last) { el.textContent = hasData ? "Not backed up yet." : "Back up your schedule to keep it safe."; el.className = "hint" + (hasData ? " stale" : ""); return; }
+  if (!last) { el.textContent = hasData ? "Not backed up yet." : "Back up your schedule to keep it safe."; el.className = "hint" + (hasData ? " stale" : ""); renderNudge(); return; }
   const daysAgo = Math.floor((Date.now() - last) / 86400000);
   el.textContent = "Last backup: " + new Date(last).toLocaleDateString([], { month: "short", day: "numeric" }) + (daysAgo >= 7 ? " (over a week ago)" : "");
   el.className = "hint" + (daysAgo >= 7 && hasData ? " stale" : "");
+  renderNudge();
 }
 $("backupBtn").addEventListener("click", async () => {
   const data = { app: "shortest-stop-route", version: 1, saved: new Date().toISOString(), data: {} };
@@ -727,7 +781,8 @@ $("restoreFile").addEventListener("change", async () => {
     const merged = { ...parse(d[k] || "{}", {}), ...parse(store.get(k) || "{}", {}) };
     store.set(k, JSON.stringify(merged));
   }
-  for (const k of ["start", "stay", "mpg", "price", "lastPos", "endMode", "endAddr"]) if (d[k] != null && !store.get(k)) store.set(k, d[k]);
+  for (const k of ["start", "stay", "mpg", "price", "lastPos", "endMode", "endAddr", "mileRate"]) if (d[k] != null && !store.get(k)) store.set(k, d[k]);
+  mergeMileLog(parse(d.mileLog || "{}", {}));
   if (!route && d.route) { const r = parse(d.route, null); if (validRoute(r)) setRoute(r); }
   selectDay(selDay);
   setStatus(added ? "Restored " + added + (added === 1 ? " job" : " jobs") + " from your backup." : "Everything in that backup was already here.");
@@ -1409,7 +1464,7 @@ function schedule(r, live) {
 
 // ---------- Rendering ----------
 let route = null;
-function saveRoute() { store.set("route", JSON.stringify(route)); }
+function saveRoute() { store.set("route", JSON.stringify(route)); try { logFromRoute(); } catch (e) {} }
 function setRoute(r, save) {
   if (!r.day) r.day = selDay;
   if (!r.plan || r.plan.length !== r.stops.length) r.plan = schedule({ ...r, plan: null }).map(x => x.arrive);
@@ -1612,7 +1667,7 @@ function pinCard(i) {
   done.type = "button";
   done.addEventListener("click", () => {
     s.done = !s.done;
-    if (s.done) s.doneAt = Date.now(); else delete s.doneAt;
+    if (s.done) s.doneAt = Date.now(); else { delete s.doneAt; unlogStop(s); }
     editingNote = -1; saveRoute(); render();
   });
   acts.append(done);
@@ -1830,7 +1885,7 @@ $("list").addEventListener("change", e => {
   if (!cb.matches("input[type=checkbox]")) return;
   const i = +cb.dataset.i;
   route.stops[i].done = cb.checked;
-  if (cb.checked) route.stops[i].doneAt = Date.now(); else delete route.stops[i].doneAt;
+  if (cb.checked) route.stops[i].doneAt = Date.now(); else { delete route.stops[i].doneAt; unlogStop(route.stops[i]); }
   editingNote = -1;
   saveRoute();
   render();
@@ -2363,6 +2418,7 @@ function startDriving() {
 }
 
 function stopDriving() {
+  flushGps();
   nav.on = false;
   if (nav.watch != null) navigator.geolocation.clearWatch(nav.watch);
   nav.watch = null;
@@ -2457,6 +2513,12 @@ function onNavFix(pos) {
   // Direction of travel: from the GPS when moving, otherwise from the last two positions.
   if (c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 1) nav.heading = c.heading;
   else if (nav.fix && geoDist(nav.fix, p) > 8) nav.heading = geoBearing(nav.fix, p);
+  // Count the miles actually driven (only from good readings, ignoring jumps).
+  if (nav.fix && p.acc <= 50 && (nav.fix.acc || 99) <= 50) {
+    const seg = geoDist(nav.fix, p);
+    if (seg > 5 && seg < 1000) nav.gpsPending = (nav.gpsPending || 0) + seg;
+  }
+  if (nav.gpsPending > 0 && Date.now() - (nav.gpsSaved || 0) > 30000) flushGps();
   nav.prevFix = nav.fix; nav.fix = p;
   navSetStatus(p.acc > 100 ? "Weak GPS signal (±" + Math.round(p.acc * 3.28084) + " ft)" : "");
 
@@ -2515,6 +2577,7 @@ function navArrive() {
   nav.arrived = true;
   if (nav.toEnd) {
     const msg = route.end.home ? "You're back at your start" : "You've reached your end point";
+    route.endReached = true; saveRoute();
     navBanner("✓", "", msg, "All done for this route. Tap Exit to close driving mode.");
     $("navEta").textContent = "Arrived";
     say(msg);
@@ -2572,6 +2635,150 @@ $("navVoice").addEventListener("click", () => {
   if (!nav.voice) { try { speechSynthesis.cancel(); } catch (e) {} } else say("Voice directions on");
 });
 document.addEventListener("keydown", e => { if (nav.on && e.key === "Escape") stopDriving(); });
+
+// ---------- Mileage log and daily summary ----------
+// Per day: each finished stop's leg (road miles, drive seconds), counted once per stop, plus GPS miles from driving mode.
+function mileBook() { try { return JSON.parse(store.get("mileLog") || "{}") || {}; } catch (e) { return {}; } }
+function saveMile(b) { store.set("mileLog", JSON.stringify(b)); }
+const gasFor = m => { const mpg = parseFloat($("mpg").value), price = parseFloat($("price").value); return mpg > 0 && price >= 0 && $("price").value !== "" ? m / 1609.344 / mpg * price : null; };
+function logFromRoute() {
+  if (!route) return;
+  const k = route.day || todayKey(), book = mileBook(), e = book[k] || {};
+  e.s = e.s || {};
+  let changed = false;
+  route.stops.forEach((st, i) => {
+    if (!st.done) return;
+    const key = noteKey(st.input), v = [Math.round(route.legs[i].d || 0), Math.round(route.legs[i].t || 0)];
+    if (!e.s[key]) { e.s[key] = v; changed = true; }
+  });
+  if (route.end && route.endReached && !e.s.__end) { e.s.__end = [Math.round(route.end.d || 0), Math.round(route.end.t || 0)]; changed = true; }
+  if (!changed) return;
+  const g = gasFor(dayMeters(e));
+  if (g != null) e.g = Math.round(g * 100) / 100;
+  book[k] = e; saveMile(book); renderMileLog();
+}
+function unlogStop(st) {
+  const k = (route && route.day) || todayKey(), book = mileBook(), e = book[k];
+  if (!e || !e.s) return;
+  delete e.s[noteKey(st.input)];
+  const g = gasFor(dayMeters(e));
+  if (g != null) e.g = Math.round(g * 100) / 100;
+  if (!Object.keys(e.s).length && !e.gps) delete book[k]; else book[k] = e;
+  saveMile(book); renderMileLog();
+}
+function flushGps() {
+  if (!(nav.gpsPending > 0)) return;
+  const k = todayKey(), book = mileBook(), e = book[k] || { s: {} };
+  e.gps = Math.round((e.gps || 0) + nav.gpsPending);
+  nav.gpsPending = 0; nav.gpsSaved = Date.now();
+  book[k] = e; saveMile(book); renderMileLog();
+}
+function mergeMileLog(theirs) {
+  const book = mileBook();
+  for (const [k, e] of Object.entries(theirs || {})) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(k) || !e || typeof e !== "object") continue;
+    const mine = book[k] || { s: {} };
+    mine.s = { ...(e.s || {}), ...(mine.s || {}) };
+    mine.gps = Math.max(mine.gps || 0, e.gps || 0);
+    if (mine.g == null && e.g != null) mine.g = e.g;
+    book[k] = mine;
+  }
+  saveMile(book); renderMileLog();
+}
+const dayMeters = e => Object.values(e.s || {}).reduce((a, v) => a + (v[0] || 0), 0);
+const daySecs = e => Object.values(e.s || {}).reduce((a, v) => a + (v[1] || 0), 0);
+const dayStops = e => Object.keys(e.s || {}).filter(x => x !== "__end").length;
+const mi1 = m => (m / 1609.344).toFixed(1);
+function sumDays(keys, book) {
+  let m = 0, g = 0, n = 0, gps = 0, gas = 0;
+  for (const k of keys) { const e = book[k]; m += dayMeters(e); g += daySecs(e); n += dayStops(e); gps += e.gps || 0; gas += e.g || 0; }
+  return { m, g, n, gps, gas };
+}
+function weekStart(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - x.getDay()); return x; }
+const dayKeyOf = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+function renderMileLog() {
+  const book = mileBook(), keys = Object.keys(book).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k)).sort().reverse();
+  const today = todayKey(), now = new Date();
+  const wk = dayKeyOf(weekStart(now)), mo = today.slice(0, 8) + "01";
+  const rate = parseFloat($("mileRate").value);
+  const cards = [["Today", keys.filter(k => k === today)], ["This week", keys.filter(k => k >= wk)], ["This month", keys.filter(k => k >= mo)]];
+  const cw = $("logCards");
+  cw.replaceChildren();
+  for (const [label, ks] of cards) {
+    const t = sumDays(ks, book), c = document.createElement("div");
+    c.className = "logCard";
+    const lab = document.createElement("span"); lab.className = "k"; lab.textContent = label;
+    const b = document.createElement("b"); b.textContent = mi1(t.m) + " mi";
+    const sm = document.createElement("small");
+    sm.textContent = t.n + (t.n === 1 ? " stop" : " stops") + (t.g ? " · " + hm(t.g) : "") + (t.gas ? " · $" + t.gas.toFixed(2) : "") + (rate > 0 && t.m ? " · $" + (t.m / 1609.344 * rate).toFixed(2) + " back" : "");
+    c.append(lab, b, sm); cw.append(c);
+  }
+  $("logEmpty").hidden = keys.length > 0;
+  $("logTableWrap").hidden = !keys.length;
+  const tb = $("logRows");
+  tb.replaceChildren();
+  document.querySelector(".logTable").classList.toggle("withRate", rate > 0);
+  for (const k of keys.slice(0, 31)) {
+    const e = book[k], tr = document.createElement("tr");
+    if (k === today) tr.className = "today";
+    const m = dayMeters(e);
+    const cells = [k === today ? "Today" : keyDate(k).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }), String(dayStops(e)), mi1(m),
+      e.gps ? mi1(e.gps) : "–", daySecs(e) ? hm(daySecs(e)) : "–", e.g != null ? "$" + e.g.toFixed(2) : "–", rate > 0 ? "$" + (m / 1609.344 * rate).toFixed(2) : ""];
+    cells.forEach((v, i) => { const td = document.createElement("td"); td.textContent = v; if (i === 6) td.className = "rateCol"; tr.append(td); });
+    tb.append(tr);
+  }
+  const tm = sumDays(keys.filter(k => k >= mo), book);
+  $("logSum").textContent = "Mileage log" + (tm.m ? " · " + mi1(tm.m) + " mi this month" : "");
+}
+function rangeKeys(range, keys) {
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const first = (yy, mm) => dayKeyOf(new Date(yy, mm, 1));
+  if (range === "month") return keys.filter(k => k >= first(y, m));
+  if (range === "last") return keys.filter(k => k >= first(y, m - 1) && k < first(y, m));
+  if (range === "year") return keys.filter(k => k.startsWith(String(y)));
+  return keys;
+}
+$("logExport").addEventListener("click", async () => {
+  const book = mileBook(), range = $("logRange").value;
+  const keys = rangeKeys(range, Object.keys(book).sort());
+  if (!keys.length) return setStatus("No miles logged for that period yet.", true);
+  const rate = parseFloat($("mileRate").value);
+  const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  const head = ["Date", "Stops", "Road miles", "GPS miles", "Drive minutes", "Gas cost"].concat(rate > 0 ? ["Reimbursement ($" + rate + "/mi)"] : []);
+  const rows = keys.map(k => { const e = book[k], m = dayMeters(e);
+    return [k, dayStops(e), mi1(m), e.gps ? mi1(e.gps) : "", Math.round(daySecs(e) / 60), e.g != null ? e.g.toFixed(2) : ""].concat(rate > 0 ? [(m / 1609.344 * rate).toFixed(2)] : []); });
+  const t = sumDays(keys, book);
+  rows.push(["Total", t.n, mi1(t.m), t.gps ? mi1(t.gps) : "", Math.round(t.g / 60), t.gas ? t.gas.toFixed(2) : ""].concat(rate > 0 ? [(t.m / 1609.344 * rate).toFixed(2)] : []));
+  const csv = [head, ...rows].map(r => r.map(v => q(String(v))).join(",")).join("\r\n");
+  const name = "mileage-" + (range === "all" ? "all" : keys[0].slice(0, 7) + (range === "year" ? "-year" : "")) + ".csv";
+  const file = new File([csv], name, { type: "text/csv" });
+  if (isPhone && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: "Mileage log" }); return setStatus("Mileage exported."); } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  setStatus("Mileage downloaded as " + name + ". It opens in Excel, Numbers or Google Sheets.");
+});
+$("mileRate").value = store.get("mileRate") || "";
+$("mileRate").addEventListener("input", () => { store.set("mileRate", $("mileRate").value); renderMileLog(); });
+renderMileLog();
+
+// ---------- Backup reminder ----------
+function renderNudge() {
+  const el = $("backupNudge");
+  if (!el) return;
+  const last = +store.get("lastBackup") || 0, snooze = +store.get("nudgeSnooze") || 0;
+  const hasData = Object.keys(daysBook()).length || unBook().length || Object.keys(mileBook()).length;
+  const days = last ? Math.floor((Date.now() - last) / 86400000) : null;
+  const due = hasData && (last ? days >= 7 : true) && Date.now() > snooze;
+  el.hidden = !due;
+  if (due) $("nudgeText").textContent = last ? "It's been " + days + " days since your last backup. Your schedule and mileage live only on this device." : "Your schedule and mileage live only on this device. Back them up so you don't lose them.";
+}
+$("nudgeBackup").addEventListener("click", () => { $("backupBtn").click(); $("backupNudge").hidden = true; });
+$("nudgeLater").addEventListener("click", () => { store.set("nudgeSnooze", String(Date.now() + 3 * 86400000)); $("backupNudge").hidden = true; });
+renderNudge();
 
 // ---------- Install as an app, offline loading, and new-version notice ----------
 const APP_VERSION = (document.body.innerHTML.match(/Version (\d+) ·/) || [])[1] || "0";
