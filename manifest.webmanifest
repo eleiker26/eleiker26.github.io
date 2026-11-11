@@ -1,0 +1,16 @@
+{
+  "name": "Shortest Stop Route",
+  "short_name": "Stop Route",
+  "description": "Plan the shortest driving route through your stops, with live GPS directions.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f3f5f4",
+  "theme_color": "#0b7a5a",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

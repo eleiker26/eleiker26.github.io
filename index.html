@@ -4,6 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shortest Stop Route</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b7a5a">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Stop Route">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -94,6 +102,12 @@ button:disabled { opacity: 0.55; cursor: progress; }
 #steps .arrow { color: var(--accent); text-align: center; font-size: 1.05rem; line-height: 1; }
 #steps .leg { font: 500 0.82rem/1 var(--mono); color: var(--muted); white-space: nowrap; }
 .turnDot { width: 14px; height: 14px; border-radius: 50%; background: #f59e0b; border: 3px solid #fff; box-shadow: 0 0 0 2px #f59e0b; }
+/* New-version notice */
+#updateBar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6000; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--fg); color: var(--bg); font-weight: 500;
+  padding: 12px max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  box-shadow: 0 -2px 12px rgba(0,0,0,.25); }
+#updateBar button { width: auto; padding: 10px 18px; background: var(--accent); color: var(--accent-fg); font-size: 0.95rem; flex: none; }
 /* Live GPS driving mode */
 :root { --nav-bg: #0d3b2c; --nav-fg: #ffffff; --nav-sub: #b9e5d3; --nav-bar: #ffffff; --nav-bar-fg: #16201c; }
 @media (prefers-color-scheme: dark) { :root { --nav-bg: #0b2a20; --nav-bar: #18201d; --nav-bar-fg: #e6ece9; } }
@@ -396,8 +410,10 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 22 · Nov 11, 2026</p>
+  <p class="note">Version 23 · Nov 11, 2026</p>
 </main>
+
+<div id="updateBar" hidden role="status"><span>A new version of the app is ready.</span><button id="updateBtn" type="button">Update now</button></div>
 
 <div id="nav" hidden role="dialog" aria-label="Driving mode">
   <div class="navTop" aria-live="polite">
@@ -2481,6 +2497,27 @@ $("navVoice").addEventListener("click", () => {
   if (!nav.voice) { try { speechSynthesis.cancel(); } catch (e) {} } else say("Voice directions on");
 });
 document.addEventListener("keydown", e => { if (nav.on && e.key === "Escape") stopDriving(); });
+
+// ---------- Install as an app, offline loading, and new-version notice ----------
+const APP_VERSION = (document.body.innerHTML.match(/Version (\d+) ·/) || [])[1] || "0";
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+async function checkForUpdate() {
+  if (!navigator.onLine || (typeof nav !== "undefined" && nav.on)) return;
+  try {
+    const res = await fetch("./?check=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const live = ((await res.text()).match(/Version (\d+) ·/) || [])[1];
+    if (live && +live > +APP_VERSION) $("updateBar").hidden = false;
+  } catch (e) {}
+}
+$("updateBtn").addEventListener("click", () => location.reload());
+if ((location.protocol === "https:" || location.hostname === "localhost")) {
+  setTimeout(checkForUpdate, 4000);
+  setInterval(checkForUpdate, 30 * 60 * 1000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
+}
 </script>
 </body>
 </html>
