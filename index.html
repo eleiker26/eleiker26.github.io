@@ -77,6 +77,23 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .totals { display: flex; gap: 22px; flex-wrap: wrap; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .totals b { display: block; font: 800 1.5rem/1.1 var(--display); }
 .totals small { color: var(--muted); font-size: 0.8rem; }
+/* Turn-by-turn directions */
+#dirWrap summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 14px; border: 2px solid var(--accent); border-radius: 10px; color: var(--accent); font: 700 1rem/1.2 var(--display); }
+#dirWrap summary::-webkit-details-marker { display: none; }
+#dirWrap summary::after { content: "Show"; font: 500 0.8rem/1 var(--mono); }
+#dirWrap[open] summary::after { content: "Hide"; }
+#dirWrap[open] summary { border-radius: 10px 10px 0 0; }
+#dirWrap summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+#steps { border-top: 0; border-radius: 0 0 10px 10px; }
+#steps li { grid-template-columns: 1.6rem 1fr auto; padding: 10px 14px; cursor: pointer; }
+#steps li:hover, #steps li:focus-visible { background: color-mix(in srgb, var(--accent) 9%, transparent); outline: none; }
+#steps li.active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+#steps li.legHead { cursor: default; background: var(--bg); font: 700 0.86rem/1.3 var(--display); }
+#steps li.legHead.done { opacity: 0.55; }
+#steps .arrow { color: var(--accent); text-align: center; font-size: 1.05rem; line-height: 1; }
+#steps .leg { font: 500 0.82rem/1 var(--mono); color: var(--muted); white-space: nowrap; }
+.turnDot { width: 14px; height: 14px; border-radius: 50%; background: #f59e0b; border: 3px solid #fff; box-shadow: 0 0 0 2px #f59e0b; }
 #map { height: 340px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; z-index: 0; }
 .pin {
   display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
@@ -327,6 +344,10 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="doneNote" class="note" hidden></p>
     <p id="paceNote" class="pace" hidden></p>
     <ol id="list"></ol>
+    <details id="dirWrap" hidden>
+      <summary id="dirSum">Turn-by-turn directions</summary>
+      <ol id="steps" aria-label="Turn-by-turn directions"></ol>
+    </details>
     <div class="links" id="links"></div>
     <p id="linkNote" class="note" hidden></p>
     <div class="row">
@@ -343,7 +364,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
     <p id="note" class="note"></p>
     <p id="warnNote" class="note warn" hidden></p>
   </section>
-  <p class="note">Version 19 · Nov 11, 2026</p>
+  <p class="note">Version 20 · Nov 11, 2026</p>
 </main>
 
 <script>
@@ -1451,7 +1472,7 @@ function renderLinks() {
 }
 
 // Map: numbered pins plus the actual driving path (straight lines if the road service is down).
-let map, layer, pathCache = { key: "", path: null }, markers = [];
+let map, layer, pathCache = { key: "", path: null, legs: null }, markers = [];
 
 // The card that opens when you tap a pin: what the stop is, when you'll get there, and the job notes.
 function pinCard(i) {
@@ -1591,18 +1612,101 @@ async function drawMap() {
 
   const key = ll.map(p => p.join(",")).join(";");
   let path = pathCache.key === key ? pathCache.path : null;
+  let legs = pathCache.key === key ? pathCache.legs : null;
   if (!path) {
     try {
       const coords = all.map(p => p.lon.toFixed(6) + "," + p.lat.toFixed(6)).join(";");
-      const res = await fetch("https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson");
+      const res = await fetch("https://router.project-osrm.org/route/v1/driving/" + coords + "?overview=full&geometries=geojson&steps=true");
       const j = await res.json();
-      if (j.code === "Ok" && j.routes[0]) path = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+      if (j.code === "Ok" && j.routes[0]) { path = j.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); legs = j.routes[0].legs; }
     } catch (e) {}
-    if (path) pathCache = { key, path };
+    if (path) pathCache = { key, path, legs };
   }
   if (route !== r) return;
   const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#0b7a5a";
   L.polyline(path || ll, { color, weight: 5, opacity: 0.85, dashArray: path ? null : "6 8" }).addTo(layer);
+  renderDirections(r, legs);
+}
+
+// ---------- Turn-by-turn directions ----------
+const ORD = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th"];
+const COMPASS = ["north", "northeast", "east", "southeast", "south", "southwest", "west", "northwest"];
+function stepText(st, toName, fromName) {
+  const m = st.maneuver, mod = m.modifier || "", road = st.name || st.ref || "";
+  const onto = road ? " onto " + road : "";
+  const side = mod.includes("left") ? "left" : mod.includes("right") ? "right" : "";
+  switch (m.type) {
+    case "depart": return (fromName ? "Leave " + fromName + " and head " : "Head ") + COMPASS[Math.round((m.bearing_after || 0) / 45) % 8] + (road ? " on " + road : "");
+    case "arrive": return "Arrive at " + toName + (side ? ", on the " + side : "");
+    case "turn": return mod === "uturn" ? "Make a U-turn" + onto : mod === "straight" ? "Go straight" + onto : "Turn " + mod + onto;
+    case "new name": return "Continue" + onto;
+    case "continue": return mod === "uturn" ? "Make a U-turn" + onto : "Continue " + (mod && mod !== "straight" ? mod : "straight") + (road ? " on " + road : "");
+    case "merge": return "Merge" + (side ? " " + side : "") + onto;
+    case "on ramp": return "Take the ramp" + (side ? " on the " + side : "") + onto;
+    case "off ramp": return "Take the exit" + (side ? " on the " + side : "") + onto;
+    case "fork": return "Keep " + (side || "straight") + " at the fork" + onto;
+    case "end of road": return "At the end of the road, turn " + (side || mod) + onto;
+    case "roundabout": case "rotary": return "At the roundabout, take the " + (ORD[m.exit] || "next") + " exit" + onto;
+    case "roundabout turn": return "At the roundabout, turn " + mod + onto;
+    case "exit roundabout": case "exit rotary": return "Exit the roundabout" + onto;
+    default: return "Continue" + (road ? " on " + road : "");
+  }
+}
+function stepArrow(st) {
+  const t = st.maneuver.type, mod = st.maneuver.modifier || "";
+  if (t === "depart") return "●";
+  if (t === "arrive") return "⚑";
+  if (/roundabout|rotary/.test(t)) return "↻";
+  if (mod === "uturn") return "↶";
+  if (mod === "left" || mod === "sharp left") return "←";
+  if (mod === "right" || mod === "sharp right") return "→";
+  if (mod === "slight left") return "↖";
+  if (mod === "slight right") return "↗";
+  return "↑";
+}
+function shortDist(m) {
+  const mi = m / 1609.344;
+  return mi < 0.1 ? Math.round(m * 3.28084 / 10) * 10 + " ft" : mi.toFixed(mi < 10 ? 1 : 0) + " mi";
+}
+let turnMarker = null;
+function renderDirections(r, legs) {
+  const wrap = $("dirWrap"), ol = $("steps");
+  ol.replaceChildren();
+  turnMarker = null;
+  if (!legs || legs.length !== r.stops.length) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+  const name = i => i ? route.stops[i - 1].input.replace(/\s*@.*$/, "") : (r.start.label || "your start");
+  let turns = 0;
+  legs.forEach((leg, k) => {
+    const s = r.stops[k];
+    const head = el("li", "legHead" + (s.done ? " done" : ""));
+    head.append(el("span", "n", String(k + 1)), el("span", "addr", "To " + name(k + 1) + (s.done ? " (done)" : "")), el("span", "leg", shortDist(leg.distance)));
+    ol.append(head);
+    leg.steps.forEach(st => {
+      if (st.maneuver.type === "notification") return;
+      turns++;
+      const li = el("li");
+      li.tabIndex = 0;
+      const a = el("span", "arrow", stepArrow(st)); a.setAttribute("aria-hidden", "true");
+      li.append(a, el("span", "addr", stepText(st, "stop " + (k + 1), k ? "stop " + k : "")), el("span", "leg", st.distance > 0 ? shortDist(st.distance) : ""));
+      const [lon, lat] = st.maneuver.location;
+      const go = () => {
+        ol.querySelectorAll("li.active").forEach(x => x.classList.remove("active"));
+        li.classList.add("active");
+        if (!map) return;
+        if (turnMarker) turnMarker.remove();
+        turnMarker = L.marker([lat, lon], { interactive: false, icon: L.divIcon({ className: "", html: '<div class="turnDot"></div>', iconSize: [20, 20], iconAnchor: [10, 10] }) }).addTo(layer);
+        map.closePopup();
+        $("map").scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+        map.setView([lat, lon], 17);
+      };
+      li.addEventListener("click", go);
+      li.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+      ol.append(li);
+    });
+  });
+  $("dirSum").textContent = "Turn-by-turn directions · " + turns + " steps";
 }
 
 // ---------- Check off stops ----------
