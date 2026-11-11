@@ -1,0 +1,12 @@
+{
+  "name": "shortest-stop-route-tests",
+  "private": true,
+  "description": "Browser tests for the route planner. Every outside service is simulated, so results don't depend on the internet.",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "leaflet": "1.9.4"
+  }
+}
