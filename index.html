@@ -470,7 +470,7 @@ button.mini, a.mini { display: inline; width: auto; padding: 4px 0; background: 
       <p class="note">Miles are the road distance of each leg you finished, counted once per stop. GPS miles are what driving mode actually tracked. The log stays on this device and is included in schedule backups.</p>
     </div>
   </details>
-  <p class="note">Version 26 · Nov 11, 2026</p>
+  <p class="note">Version 27 · Nov 11, 2026</p>
 </main>
 
 <div id="updateBar" hidden role="status"><span>A new version of the app is ready.</span><button id="updateBtn" type="button">Update now</button></div>
@@ -855,11 +855,18 @@ function censusItem(m) {
 // Esri's address search fills in partly typed addresses ("75 S Sandus" → 75 S Sandusky St, Delaware, OH).
 // Its suggestions carry no location yet; tapping one looks it up with arcgisLocate.
 const ARCGIS = "https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/";
+// Ohio, plus a little past each border for towns just across the line.
+const OHIO_BOX = "-85.1,38.2,-80.3,42.3";
 async function arcgisSuggest(q, b, signal) {
   const loc = b && isFinite(b.lat) ? (+b.lon).toFixed(4) + "," + (+b.lat).toFixed(4) : "-82.9,40.2";
-  const res = await fetch(ARCGIS + "suggest?f=json&countryCode=USA&maxSuggestions=6&location=" + loc + "&text=" + encodeURIComponent(q), { signal });
-  if (!res.ok) return [];
-  return ((await res.json()).suggestions || []).filter(x => !x.isCollection).map(x => {
+  const ask = async box => {
+    const res = await fetch(ARCGIS + "suggest?f=json&countryCode=USA&maxSuggestions=6&location=" + loc + (box ? "&searchExtent=" + box : "") + "&text=" + encodeURIComponent(q), { signal });
+    return res.ok ? ((await res.json()).suggestions || []) : [];
+  };
+  // Ohio first; only search the whole country when nothing in Ohio matches.
+  let found = await ask(OHIO_BOX);
+  if (!found.length) found = await ask("");
+  return found.filter(x => !x.isCollection).map(x => {
     const parts = x.text.replace(/,\s*USA$/, "").split(",").map(t => t.trim());
     if (parts.length >= 3 && /^\d{5}$/.test(parts[parts.length - 1])) parts.splice(-2, 2, parts[parts.length - 2] + " " + parts[parts.length - 1]);
     const text = parts.join(", ");
@@ -882,7 +889,7 @@ async function suggestPlaces(q, signal) {
   if (b && isFinite(b.lat)) url += "&lat=" + (+b.lat).toFixed(4) + "&lon=" + (+b.lon).toFixed(4);
   let features = [];
   try {
-    const res = await fetch(url, { signal });
+    const res = await fetch(url + "&bbox=" + OHIO_BOX, { signal });
     if (res.ok) features = (await res.json()).features || [];
   } catch (e) { if (e.name === "AbortError") throw e; }
   const osm = [];
@@ -908,6 +915,9 @@ async function suggestPlaces(q, signal) {
   const order = isAddr ? [esriItems.slice(0, 4), censusItems, osmAddr] : [osm.slice(0, 4), esriItems];
   // Same street and city counts as the same place, whatever the ZIP or capitalization.
   const key = it => it.text.toLowerCase().replace(/\s+\d{5}(-\d{4})?\b/g, "").replace(/\s+/g, " ");
+  // Ohio places only, unless nothing in Ohio matches.
+  const inOhio = it => /\bOH\b/.test(it.sub);
+  if (order.some(list => list.some(inOhio))) order.forEach((list, k) => { order[k] = list.filter(inOhio); });
   const out = [], seen = new Set();
   for (const list of order) for (const it of list) {
     if (out.length === 6) break;
